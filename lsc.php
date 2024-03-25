@@ -31,8 +31,8 @@ $GLOBALS["schemadef"]=Array(
 				   .'/toplink:				configure'
 				   ,
  'conf/uuid'			=> 'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
- 'conf/basefilepath'		=> 'req:y/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localdir/form-label:Base File Path/default-value-from-ini:homedir',
- 'conf/stdoutfilepath'		=> 'req:y/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localdir/form-label:stdout File Path/default-value-from-ini:stdoutdir',
+ 'conf/basefilepath'		=> 'req:y/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localdir/form-label:Base File Path/default-value-from-ini:homedir/present-width:full-width',
+ 'conf/stdoutfilepath'		=> 'req:y/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localdir/form-label:stdout File Path/default-value-from-ini:stdoutdir/present-width:full-width',
  # ---------------------------------------------------------------------------
  'rpmap/FOR_THIS_APP'		=> 'title:Locations (Port and Prefix)'
 				   .'/new-form-title:			Define A Port and Prefix Combination'
@@ -63,9 +63,9 @@ $GLOBALS["schemadef"]=Array(
  'defined/uuid'			=> 'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
  'defined/name'			=> 'req:y/type:str/data:name/minlen:   1/maxlen:     50/injourney:user-enters-text/form-label:Service Name',
  'defined/description'		=> 'req:n/type:str/data:name/minlen:   0/maxlen:   4000/injourney:user-enters-text/form-label:Service Description',
- 'defined/command'		=> 'req:y/type:str/data:cmd /minlen:   1/maxlen:    500/injourney:user-selects-from-ini-list/form-label:Command'.
+ 'defined/command'		=> 'req:y/type:str/data:cmd /minlen:   1/maxlen:    500/injourney:user-selects-from-ini-list/form-label:Command/present-width:full-width'.
 				   '/ini-list-section:whitelist/ini-list-array:bin',
- 'defined/arguments'		=> 'req:n/type:str/data:name/minlen:   0/maxlen:   4000/injourney:user-enters-text/form-label:Command Arguments (With Substitution Points)',
+ 'defined/arguments'		=> 'req:n/type:str/data:name/minlen:   0/maxlen:   4000/injourney:user-enters-text/form-label:Command Arguments (With Substitution Points)/present-width:full-width',
  'defined/defaultfile'		=> 'req:n/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text/form-label:Default File (blank for none) {LOCALFILE}'.
 				   '/provides-defaults/gives-default-for-table:running/gives-default-for-column:localfile',
  'defined/defaultrpmap'		=> 'req:n/type:int/data:port/minval:1024/maxval:  65535/injourney:user-selects-from-list-in-other-table/form-label:Port And URL Prefix Combo'.
@@ -91,7 +91,7 @@ $GLOBALS["schemadef"]=Array(
 				   '/is-pointer-to:defined/pointer-links-by:uuid/shown-by:name'.
 				   '/display-using-other-table/display-sql-SELECT:name/display-sql-FROM:defined/display-sql-WHERE:uuid/display-sql-IS:pointer_to_defined',
  'running/pid'			=> 'req:y/type:int/data:pid /minval:   2/maxval:4194304/injourney:app-generates/form-label:Process ID',
- 'running/localfile'		=> 'req:n/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localfile/form-label:Local File {LOCALFILE}',
+ 'running/localfile'		=> 'req:n/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localfile/form-label:Local File {LOCALFILE}/present-width:full-width',
  'running/rpmap'		=> 'req:n/type:int/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Location (Port and URL Prefix)/must-be-unique'.
 	   			   '/is-pointer-to:rpmap/pointer-links-by:number/shown-by:number,urlprefix'.
 				   '/display-using-other-table/display-sql-SELECT:number,urlprefix/display-sql-FROM:rpmap/display-sql-WHERE:number/display-sql-IS:rpmap',
@@ -133,7 +133,7 @@ function HOMEPAGE() {
 # Called when the action is "show" and the table is "none."
 
  # Display some friendly information.
- echo "<p>This is lsc> - Lawrence's Service Controller.</p>\n";
+ echo "<p>This is <code>lsc</code> - Lawrence's Service Controller.</p>\n";
  echo "<p><code>lsc</code> allows you to define <i>services</i>, and once defined, start and stop them.</p>\n";
  echo "<p>A service is a command that takes a filename, URL prefix, and/or a port number as part of its arguments.  These types of commands typically serve files over your network or the Internet and may be something you wish to conveniently start and stop remotely.</p>\n";
  echo "<p>If this is a new instance, you will first need to whitelist your desired executables in <code>lsc</code>'s INI file (<code>/etc/lsc/\$USER/lsc.ini</code>).  Then create a configuration.  Next, you'll want to define a service or two, and after that, you can start and stop them from this interface.</p>\n";
@@ -267,7 +267,7 @@ function GENERATOR_pid (
  # Make sure it doesn't die right away.
  sleep(2);
  if(!posix_getpgid($pidArr[0])) {
-  $removing=true; $removing_info="PID ".$pidArr[0]." was started, but then died right away.";
+  $removing=true; $removing_info=make_presentable($pidArr[0],"pid")." was started, but then died right away.";
   }
 
  $GLOBALS["extra_goodies"].="<div class='stdout-top'>Last 50 lines of captured <tt>stdout</tt>:</div>\n";
@@ -277,7 +277,7 @@ function GENERATOR_pid (
 
  if(!$removing) {
   $returned_value=$pidArr[0]; 
-  report_and_log(true,$rdefined["name"]." ".$re."started (PID ".$pidArr[0].")","");
+  report_and_log(true,$rdefined["name"]." ".$re."started ".make_presentable($pidArr[0],"pid"),"");
   return true;
   }
 
@@ -335,7 +335,7 @@ function ROWMETHOD_execute_maint(
 
  if($close) {
   delete_row_bypass_schema($in_table,"uuid",$in_target);
-  mnotice("closing request '".$rrequest["uuid"]."'.");
+  mnotice("closing request '".make_presentable($rrequest["uuid"],"uuid")."'.");
   }
 
  }
@@ -358,10 +358,13 @@ function ROWMETHOD_check_running(
 
  $removing=false; $removing_info="";
  
+ $update_data['lastchecked']=time();
+ update_row($in_target_table,$update_data,"uuid",$in_target);
+ 
  if(posix_getpgid($pid)) { 
-  report_and_log("true","PID ".$pid." is still running.","");
+  report_and_log("true",make_presentable($pid,"pid")." is still running.","");
   }else{
-  $removing=true; $removing_info="PID ".$pid." is no longer running.";
+  $removing=true; $removing_info=make_presentable($pid,"pid")." is no longer running.";
   }
 
  if($removing) {
@@ -469,13 +472,6 @@ function ROWMETHOD_restart_trashcan (
   set_report_names_for_insert("running",$corpse);
   make_backrefs_for_new_row("running",$corpse);
   insert_row("running",$corpse);
-  $o=$GLOBALS["report"]["target_objectname"]." '".$GLOBALS["report"]["target_instancename"]."'";
-  if(any_errors()) {
-   report_and_log(false,"Error re-creating ".$o,""); 
-   break;
-   }else{
-   report_and_log(true,"new ".$o." re-created",""); 
-   }
   } while (false); 
   return true;
 
@@ -1115,8 +1111,7 @@ function start_output($in_format, $in_table) {
    echo "<!doctype html>\n";
    echo "<html>\n";
    echo "<head>\n";
-   echo "<title>lsc</title>\n";
-   set_styles();
+   echo "<title>lsc.php 20240322</title>\n";
    style_sheet();
    echo "</head>\n";
    echo "<body>\n";
@@ -1251,12 +1246,12 @@ function finish_output($in_format='html') {
 function output_log($in_return_link) {
 # Output log table (history of actions)
 
- echo "<table ".st("03").">\n";
- echo "<caption ".st("04").">Recent Actions</caption>\n";
+ echo "<table class='non-editable-table'>\n";
+ echo "<caption class='non-editable-table-caption'>Recent Actions</caption>\n";
  if(isset($GLOBALS["timezone"])) { 
-  echo "<tr><td ".st("12").">Time Zone: ".$GLOBALS["timezone"]."</td></tr>\n";
+  echo "<tr><td class='action-history-event'>Time Zone: ".$GLOBALS["timezone"]."</td></tr>\n";
   } else {
-  echo "<tr><td ".st("12").">Dates/Times Are Server Local</td></tr>\n";
+  echo "<tr><td class='action-history-event'>Dates/Times Are Server Local</td></tr>\n";
   }
  $loglines=Array(); 
  $loglines=read_table_all_rows("log");
@@ -1264,12 +1259,12 @@ function output_log($in_return_link) {
  foreach(array_reverse($loglines) as $logline) {
 
   echo "<tr><td>";
-  echo "<table ".st("13").">";
+  echo "<table class='action-history-container'>";
   echo "<tr>";
-  echo "<td ".st("10").">".timestamp_to_string($logline["timestamp"])."</td>";
+  echo "<td class='action-history-date'>".timestamp_to_string($logline["timestamp"])."</td>";
   echo "</tr>";
   echo "<tr style='border-color: black; border-style: solid;'>";
-  echo "<td ".st("12").">".$logline["eventdesc"]."</td>";
+  echo "<td class='action-history-event'>".$logline["eventdesc"]."</td>";
   echo "</tr>";
 
   if($logline["button_type"]!="none") {
@@ -1312,10 +1307,8 @@ function output_table_noneditable($in_which_table,$in_rows_array) {
  echo "<div style='display: block;' id='view' class='tabcontent'>\n";
 
  # Begin generating our table
- echo "<table ".st("03").">\n";
+ echo "<table class='non-editable-table'>\n";
  echo "<caption class='form-top'>Current ".$table_metadata["title"]."</caption>\n";
- #Not needed: titie emitted at content_panel_start().
- #echo "<caption ".st("04").">".$table_metadata['title']."</caption>\n";
 
  # Options flag - set if we have an extra column for the user to do things to
  # the row, like delete or row methods.
@@ -1330,14 +1323,8 @@ function output_table_noneditable($in_which_table,$in_rows_array) {
   $attrs_cols[$col]=schema_rowattr($in_which_table.'/'.$col);
   $headers[$col]=$attrs_cols[$col]["form-label"];
   }
- # 
- ## Output options column if needed.
- #if($options) {
- # echo "      <td>Options</td>\n";
- # }
- # 
- #
 
+ # We're gonna output some stuff in a bit.
  $deferred=Array();
 
  # Process results from query ...
@@ -1366,7 +1353,7 @@ function output_table_noneditable($in_which_table,$in_rows_array) {
    # Do we need to use another table to output this data?
    if(!isset($attrs["display-using-other-table"])){
     # Nothing special if not ...
-    $data_to_show=$row[$col];
+    $data_to_show=make_presentable($row[$col],$attrs["data"]);
     }else{
     # If "display-using-other-table" is defined ...
     # that means we don't want to show the raw data value from the table's
@@ -1398,13 +1385,25 @@ function output_table_noneditable($in_which_table,$in_rows_array) {
       $data_to_show=$assembled;
       }
      }
-   #
+
    # Present the data to show from the row's column.
-   echo"<tr>\n";
-   echo"<td class='form-column-header'>".$headers[$col]."</td>";
-   if($data_to_show===""){$data_to_show="<span ".st("09")."><i>No data</i></span>";}
-   echo"<td class='form-column-data'>".$data_to_show."</td>\n";
-   echo"</tr>\n";
+   switch (@$attrs["present-width"]) {
+    case "full-width": 
+     echo "<tr>\n";
+     echo "<td colspan=2 class='form-column-header-full'>".$headers[$col]."</td>";
+     echo "</tr>\n";
+     echo "<tr>\n";
+     if($data_to_show===""){$data_to_show="<span class='no-data'><i>No data</i></span>";}
+     echo"<td colspan=2 class='form-column-data-full'>".$data_to_show."</td>\n";
+     echo"</tr>\n";
+     break;
+    default:
+     echo "<tr>\n";
+     echo "<td class='form-column-header'>".$headers[$col]."</td>";
+     if($data_to_show===""){$data_to_show="<span class='no-data'><i>No data</i></span>";}
+     echo"<td class='form-column-data'>".$data_to_show."</td>\n";
+     echo"</tr>\n";
+    }
    }
   #
   # Handle options column here.
@@ -1530,7 +1529,7 @@ function output_new_form($in_which_table,$in_rows_count,$in_ini) {
  echo "<input type='hidden' id='action' name='action' value='new_row' />\n";
  echo "<input type='hidden' id='table' name='table' value='".$in_which_table."' />\n";
 
- echo "<table ".st("03").">\n";
+ echo "<table class='non-editable-table'>\n";
  echo "<caption class='form-top'>".$table_metadata["new-form-title"]."</caption>\n";
 
  $something_wrong=false;
@@ -1554,11 +1553,28 @@ function output_new_form($in_which_table,$in_rows_count,$in_ini) {
   if(isset($table_metadata["defaults-here-keyed-by"]) and $table_metadata["defaults-here-keyed-by"]===$col){
    $hook1.="onChange='populate_defaults();'";
    }
-
+  
+  # Generate HTML needed to service "present-width" schema attribute.
+  $apply_header="";
+  $apply_between="";
+  $apply_body="";
+  switch (@$attrs["present-width"]) { 
+   case "full-width":
+    $apply_header="class='form-column-header-new-full' colspan=2";
+    $apply_between="</tr>\n<tr>\n";
+    $apply_body  ="class='form-column-data-new-full' colspan=2";
+    break;
+   default:
+    $apply_header="class='form-column-header-new'";
+    $apply_between="";
+    $apply_body  ="class='form-column-data-new'";
+   } 
+  
   # Start row by emitting label (if "dont-show" flag is not set)
   if (!isset($attrs["dont-show"])) { 
    echo "<tr>\n";
-   echo "<td class='form-column-header-new'><label for='".$id."'>".$attrs["form-label"]."</label></td>\n"; 
+   echo "<td ".$apply_header."><label for='".$id."'>".$attrs["form-label"]."</label></td>\n"; 
+   echo $apply_between;
    }
   #
   # Emit input element based on injourney attribute of column.
@@ -1573,7 +1589,7 @@ function output_new_form($in_which_table,$in_rows_count,$in_ini) {
     if(isset($attrs["default-value-from-ini"])) {
      $tmp="value='".$in_ini["defaults"][$attrs["default-value-from-ini"]]."'";
      }
-    echo "<td class='form-column-data-new'><input ".$validators[$col]." ".$hook1." type='text' id='".$id."' name='".$id."' ".$tmp."/></td>\n";
+    echo "<td ".$apply_body."><input style='width: 98%;".$validators[$col]." ".$hook1." type='text' id='".$id."' name='".$id."' ".$tmp."/></td>\n";
     break;
     }
    case "list": {
@@ -1623,10 +1639,10 @@ function output_new_form($in_which_table,$in_rows_count,$in_ini) {
     # Otherwise emit input element.
     if (!isset($attrs["dont-show"]) and count($list_data["targets"])==0) {
      $something_wrong=true;
-     echo "<td class='form-column-data'><p>None available.</p></td>";
+     echo "<td ".$apply_body."><p>None available.</p></td>";
      }
     if (!isset($attrs["dont-show"]) and count($list_data["targets"])!=0) {
-     echo "<td class='form-column-data'><select ".$hook1." name='".$id."' id='".$id."'>";
+     echo "<td ".$apply_body."><select style='width: 100%;' ".$hook1." name='".$id."' id='".$id."'>";
      echo "<option value='' disabled selected hidden>(select one)</option>";
      $n=0;
      foreach ($list_data["targets"] as $list_datum) {
@@ -1657,6 +1673,7 @@ function output_new_form($in_which_table,$in_rows_count,$in_ini) {
  echo "</form>\n";
  echo "</div>\n";
  }
+
 
 function new_form_defaults_from_table($in_which_table,
 				      $in_table_metadata,
@@ -1730,6 +1747,27 @@ function new_form_defaults_from_table($in_which_table,
  $GLOBALS["js"].=" }; populate_defaults();\n";
  }
 
+
+function make_presentable($in_data,$in_type) {
+ switch ($in_type) {
+  case "pid":
+   $out_data="<span class='presenting-pid'>PID ".$in_data."</span>";
+   break;
+  case "uuid":
+   $out_data="<span class='presenting-uuid'>UUID ".$in_data."</span>";
+   break;
+  case "date":
+   if($in_data==="") { 
+    $out_data="[No timestamp]";
+   } else {
+    $out_data=timestamp_to_string($in_data);
+   }
+   break;
+  default: 
+   $out_data=$in_data;
+  }
+  return $out_data;
+ } 
 
 # ----------------------------------------------------------------------------
 # [ Schema definition parsing functions ]
@@ -2921,33 +2959,6 @@ function ingest_ini($in_ini_filename) {
 # ----------------------------------------------------------------------------
 
 
-function st($in_style) {
-# Allows specifying a style in a few characters.
-
- return "style='".$GLOBALS["style".$in_style].";'";
- }
-
-function set_styles() {
-# Styles, selected by a two-digit number or code.
-
- # style03: Non-editable table (at table element)
- $GLOBALS["style03"]="padding: 2px; border-style: solid; border-width: 1px; border-color: black; word-break: break-word";
- # style03: Non-editable table (at table element)
- $GLOBALS["style03"]="padding: 2px; border-style: solid; border-width: 1px; border-color: black; word-break: break-word";
- # style03: Non-editable table (at table element)
- $GLOBALS["style03"]="padding: 2px; border-style: solid; border-width: 1px; border-color: black; word-break: break-word";
- # style04: Non-editable table caption (caption element after first table element)
- $GLOBALS["style04"]="background-color: #c0c0c0";
- # style09: No data
- $GLOBALS["style09"]="color: #c0c0c0";
- # style10: log date
- $GLOBALS["style10"]="text-align: right; padding: 0px 0px 1px 0px; margin: 0px; font-size: 12px; background-color: #c0c0c0";
- # style12: log event name
- $GLOBALS["style12"]="padding: 1px; margin: 0px; font-size: 12px";
- # style13: log output table
- $GLOBALS["style13"]="background-color: white; padding: 0px; margin: 0px; word-break: break-word";
- }
-
 function style_sheet() {
 # Spit out inlined style sheet. 
 # Minified version of normalize.css and concrete.css
@@ -2981,14 +2992,27 @@ function style_sheet() {
  echo ".stdout-top { font-style: italic; margin: 0px 0px 0px 0px; padding: 16px 0px 0px 0px; }\n";
  echo ".stdout { font-family: monospace; font-size: 0.9rem; width: 100%; }\n";
 
- echo ".form-column-header     { font-size: 1rem; width: 30%; padding: 0px 0px 0px 0px; vertical-align: middle; background-color: #c0c0c0; border: 1px solid #ffffff; }\n";
- echo ".form-column-data       { font-size: 1rem; padding: 0px; vertical-align: middle; }\n";
+ echo ".form-column-header          { font-size: 1rem; width: 30%; padding: 0px 0px 0px 0px; vertical-align: middle; background-color: #c0c0c0; border: 1px solid #ffffff; }\n";
+ echo ".form-column-header-full     { font-size: 1rem; width: 100%; padding: 0px 0px 0px 0px; vertical-align: middle; background-color: #c0c0c0; border: 1px solid #ffffff; }\n";
+ echo ".form-column-data            { font-size: 1rem; padding: 0px; vertical-align: middle; }\n";
+ echo ".form-column-data-full       { font-size: 1rem; width: 100%; padding: 0px; vertical-align: middle; }\n";
 
- echo ".form-column-header-new { font-size: 1rem; width: 30%; padding: 0px 0px 0px 0px; vertical-align: middle; background-color: #c0c0c0; border: 1px solid #ffffff; }\n";
+ echo ".form-column-header-new      { font-size: 1rem; width: 30%; padding: 0px 0px 0px 0px; vertical-align: middle; background-color: #c0c0c0; border: 1px solid #ffffff; }\n";
+ echo ".form-column-header-new-full { font-size: 1rem; width: 100%; padding: 0px 0px 0px 0px; vertical-align: middle; background-color: #c0c0c0; border: 1px solid #ffffff; }\n";
  echo "label { font-size: 1rem; }\n";
- echo ".form-column-data-new   { font-size: 1rem; padding: 0px 0px 0px 0px; vertical-align: middle; }\n";
+ echo ".form-column-data-new        { font-size: 1rem; padding: 0px 0px 0px 0px; vertical-align: middle; }\n";
+ echo ".form-column-data-new-full   { font-size: 1rem; padding: 0px 0px 0px 0px; vertical-align: middle; }\n";
+ echo ".non-editable-table { padding: 2px; border-style: solid; border-width: 1px; border-color: black; word-break: break-word; }\n";
+ echo "caption.non-editable-table-caption { background-color: #c0c0c0; }\n";
  echo "caption.form-top { text-align: left; font-style: italic; padding: 16px 0px 0px 0px; }\n";
  echo ".return-link { text-align: right; }\n";
+ echo ".presenting-pid { border-style: solid; border-width: 1px; padding-left: 5px; padding-right: 5px; font-size: 0.8rem; font-family: monospace; }\n";
+ echo ".presenting-uuid { border-style: solid; border-width: 1px; padding-left: 5px; padding-right: 5px; font-size: 0.8rem; font-family: monospace; }\n";
+ echo ".no-data { color: #c0c0c0; }\n";
+ echo ".action-history-date { text-align: right; padding: 0px 0px 1px 0px; margin: 0px; font-size: 12px; background-color: #c0c0c0; }\n";
+ echo ".action-history-event { padding: 1px; margin: 0px; font-size: 12px; }\n";
+ echo ".action-history-container { background-color: white; padding: 0px; margin: 0px; word-break: break-word; }\n";
+
  echo "</style>\n";
  }
 
