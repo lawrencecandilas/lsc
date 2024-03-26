@@ -14,6 +14,8 @@ $my_name=$my_name_tmp[array_key_last($my_name_tmp)];
 $user=get_current_user(); $hostname=gethostname();
 
 set_globals($user,$hostname,$my_name);
+$GLOBALS["output_trace_msgs"]=false;
+$GLOBALS["output_debug_msgs"]=false;
 
 # === MASTER SCHEMA DEFINITION
 # - Defines tables and columns.
@@ -132,12 +134,12 @@ $GLOBALS["schemadef"]=Array(
 function HOMEPAGE() {
 # Called when the action is "show" and the table is "none."
 
- # Display some friendly information.
- echo "<p>This is <code>lsc</code> - Lawrence's Service Controller.</p>\n";
- echo "<p><code>lsc</code> allows you to define <i>services</i>, and once defined, start and stop them.</p>\n";
+ # Friendly introduction.
+ echo "<p>This is <span class='tt'>lsc</span> - Lawrence's Service Controller.</p>\n";
+ echo "<p><span class='tt'>lsc</span> allows you to define <i>services</i>, and once defined, start and stop them.</p>\n";
  echo "<p>A service is a command that takes a filename, URL prefix, and/or a port number as part of its arguments.  These types of commands typically serve files over your network or the Internet and may be something you wish to conveniently start and stop remotely.</p>\n";
- echo "<p>If this is a new instance, you will first need to whitelist your desired executables in <code>lsc</code>'s INI file (<code>/etc/lsc/\$USER/lsc.ini</code>).  Then create a configuration.  Next, you'll want to define a service or two, and after that, you can start and stop them from this interface.</p>\n";
- echo "<p><code>lsc</code> as shipped will not run as root, can only launch executables that are whitelisted, will not run setuid/setgid executables, and can only manage services it has started that are running under the same local user account as itself.  There is also an internal blacklist of executable names <code>lsc</code> will refuse to run, such as <code>/bin/rm</code>.</p>\n";
+ echo "<p>If this is a new instance, you will first need to whitelist your desired executables in <code>lsc</code>'s .INI file (<span class='tt'>/etc/lsc/".$GLOBALS["username"]."/lsc.ini</span>).  Then create a configuration.  Next, you'll want to define some locations, a service or two, and after that, you can start and stop them from this interface.</p>\n";
+ echo "<p><span class='tt'>lsc</span> as shipped will not run as root, can only launch executables that are whitelisted, will not run setuid/setgid executables, and can only manage services it has started that are running under the same local user account as itself.  There is also an internal blacklist of executable names <span class='tt'>lsc</span> will refuse to run, such as <span class='tt'>/bin/rm</span>.</p>\n";
  }
 
 # ----------------------------------------------------------------------------
@@ -289,6 +291,7 @@ function GENERATOR_pid (
   # below not needed, never created.
   #delete_row_bypass_schema($in_target_table,"uuid",$in_target);
   insert_row("trashcan",$trash);
+  if(any_db_error()) { return false; }
   report_and_log(true,$removing_info,"",false,"restart",$trash["uuid"]);
   mbutton(BUTTONHTML_restart($trash["uuid"]));
   }
@@ -335,6 +338,7 @@ function ROWMETHOD_execute_maint(
 
  if($close) {
   delete_row_bypass_schema($in_table,"uuid",$in_target);
+  if(any_db_error()) { return false; }
   mnotice("closing request '".make_presentable($rrequest["uuid"],"uuid")."'.");
   }
 
@@ -373,7 +377,9 @@ function ROWMETHOD_check_running(
   $trash["localfile"]=$rrunning["localfile"];
   $trash["rpmap"]=$rrunning["rpmap"];
   delete_row_bypass_schema($in_target_table,"uuid",$in_target);
+  if(any_db_error()) { return false; }
   insert_row("trashcan",$trash);
+  if(any_db_error()) { return false; }
   report_and_log(true,$removing_info,"",false,"restart",$trash["uuid"]);
   mbutton(BUTTONHTML_restart($trash["uuid"]));
   } 
@@ -419,7 +425,9 @@ function ROWMETHOD_stop_running(
   $trash["localfile"]=$rrunning["localfile"];
   $trash["rpmap"]=$rrunning["rpmap"];
   delete_row_bypass_schema($in_target_table,"uuid",$in_target);
+  if(any_db_error()) { return false; }
   insert_row("trashcan",$trash);
+  if(any_db_error()) { return false; }
   report_and_log(true,$removing_info,"",false,"restart",$trash["uuid"]);
   mbutton(BUTTONHTML_restart($trash["uuid"]));
   } 
@@ -453,6 +461,7 @@ function ROWMETHOD_restart_trashcan (
  # look for buttons referring to this trash item.
  $log_line=Array();
  read_row_expecting_just_one($log_line,"log","button_type_target",$in_target);
+ if(any_db_error()) { return false; }
  $log_line["button_type"]="restarted";
  $log_line["button_type_target"]="none";
  update_row("log",$log_line,"button_type_target",$in_target); 
@@ -471,7 +480,9 @@ function ROWMETHOD_restart_trashcan (
   # Corpse should be reanimated at this point.
   set_report_names_for_insert("running",$corpse);
   make_backrefs_for_new_row("running",$corpse);
+  if(any_db_error()) { return false; }
   insert_row("running",$corpse);
+  if(any_db_error()) { return false; }
   } while (false); 
   return true;
 
@@ -591,6 +602,8 @@ switch ($ACTION) {
    if(any_errors()) { break; }
   open_database($ini["database"]["name"]);
    if(any_errors()) { break; }
+  begin_sql_transaction();
+   if(any_errors()) { break; }
   validate_data_array($P["table"],$ARRAY_IN_DATA);
    if(any_errors()) { break; }
   bounce_single_row_only($P["table"]);
@@ -601,14 +614,16 @@ switch ($ACTION) {
   if(!$result) { break; }
   set_report_names_for_insert($P["table"],$ARRAY_IN_DATA);
   make_backrefs_for_new_row($P["table"],$ARRAY_IN_DATA);
+   if(any_errors()) { break; }
   insert_row($P["table"],$ARRAY_IN_DATA);
+   if(any_errors()) { break; }
   $o=$GLOBALS["report"]["target_objectname"]." '".$GLOBALS["report"]["target_instancename"]."'";
    if(any_errors()) {
     report_and_log(false,"Error creating new ".$o,"Failed to create new ".$o."."); 
     break;
     }else{
+    $GLOBALS["sqltxn_commit"]=true;
     report_and_log(true,"new ".$o." created",""); 
-    $R="success";
     }
   break;
  # ---------------------------------------------------------------------------
@@ -627,7 +642,11 @@ switch ($ACTION) {
   #run_any_actions('before-delete',$P["table"],$ARRAY_IN_DATA);
    #if(count($GLOBALS["outmsgs"]["errors"])!=0) { break; }
   bounce_readonly($ACTION);
+   if(any_errors()) { break; }
   open_database($ini["database"]["name"]);
+   if(any_errors()) { break; }
+  begin_sql_transaction();
+   if(any_errors()) { break; }
   $deleteable=set_report_names_for_delete($P["table"],$P["target"]);
    if(any_errors()) { break; }
    if(!$deleteable) { break; }
@@ -636,6 +655,7 @@ switch ($ACTION) {
    if(any_errors()) {
     break;
     }else{
+    $GLOBALS["sqltxn_commit"]=true;
     report_and_log(true,"Deleted ".$o,"");
     }
   break;
@@ -652,11 +672,17 @@ switch ($ACTION) {
    if(any_errors()) { break; }
   open_database($ini["database"]["name"]);
    if(any_errors()) { break; }
+  begin_sql_transaction();
+   if(any_errors()) { break; }
   if($P["target_table"]==="optional") { $P["target_table"]=$P["table"]; }
+  $GLOBALS["sqltxn_commit"]=true;
+   # Row methods are responsible for clearing $GLOBALS["sqltx_commit"] if 
+   # writes should not be committed. It's assumed most row method actions will
+   # at least want to write to the log even in the case of failure.
   row_method_action($P["row_method"],
 		    $P["table"],$P["target"],$P["target_table"],
 		    $_POST,$ini);
-   if(any_errors()) { break; } else { $R="success"; }
+   if(any_errors()) { break; }
    break;
  # ---------------------------------------------------------------------------
  case "show":
@@ -687,13 +713,18 @@ switch ($ACTION) {
    if(any_errors()) { break; }
   open_database($ini["database"]["name"]);
    if(any_errors()) { break; }
+  begin_sql_transaction();
+   if(any_errors()) { break; }
   delete_all_rows_bypass_schema("log");
+   if(any_errors()) { break; }
   do_erase_upon_clear_logs();
+   if(any_errors()) { break; }
   update_row("internal",Array("nlog"=>0),"rowid",1);
    if(any_errors()) {
     report_and_log(false,"Clearing action history failed.","");
     break;
     }else{
+    $GLOBALS["sqltxn_commit"]=true;
     report_and_log(true,"Action history cleared.","");
     }
   break;
@@ -731,6 +762,10 @@ if(isset($P["return_to"]) and $P["return_to"]!=="optional") {
   $return_link.="?table=".$P["table"];
   }
 }
+
+# Nothing beyond this point should be writing to the database.
+# Reading may still be possible.
+end_any_sql_transaction();
 
 switch ($ACTION) {
  case "new_row":
@@ -960,6 +995,14 @@ function merr($in_msg_text,$in_flags="") {
  }
 
 
+function mtrace($in_msg_text,$in_flags="") {
+ if($in_flags==="") {
+  $GLOBALS["outmsgs"]["trace"][]=$in_msg_text;
+  } else {
+  $GLOBALS["outmsgs"]["trace"][]="[".$in_flags."] ".$in_msg_text;
+  }
+ }
+
 function report_and_log($in_success,
    			$in_eventdesc,$in_eventbody,
 			$offer_event_view=false,
@@ -969,11 +1012,17 @@ function report_and_log($in_success,
 #    whether something succeeded (true) or failed (false).
 # 2. Also writes in and other data optionally ($in_event_body) to the action
 #    history.
+# 3. Ends current SQL transaction and begins a new one.
+
+ end_any_sql_transaction();
+ begin_sql_transaction();
 
  if($in_success) { mnotice($in_eventdesc); }else{ merr($in_eventdesc); }
- log_entry("app",
+ $log_writing_result=log_entry("app",
 	   $in_eventdesc,$in_eventbody,
 	   $offer_event_view,$button_type,$button_type_target);
+
+ $GLOBALS["sqltxn_commit"]=$log_writing_result;
  }
 
 
@@ -1070,19 +1119,25 @@ function path_merge($path1,$path2) {
 
 
 function make_filename_ready($in_string) {
- $out_string="";
+# Take incoming string and make it a well behaved filename.
+
+ if(is_null($in_string)) { return guidv4(); }
  for($i=0;$i<strlen($in_string);$i++){
   if(str_contains('\\/?* @$&:;,.><|',$in_string[$i])) {
    $out_string.='_';
    } else { 
    $out_string.=$in_string[$i];
    }
+   if($i>40){ break; } # Max 40 chars.
   }
   return $out_string;
  }
 
 
 function timestamp_to_string($in_timestamp) {
+# * Uses $GLOBALS["tz"].
+# Converts timestamp to date('m/d/Y h:i:s a').
+
  if(!isset($GLOBALS["tz"])) {
   return date('m/d/Y h:i:s a', $in_timestamp);
   } else { 
@@ -1196,7 +1251,9 @@ function history_panel_end() {
 function content_top($in_table_metadata) {
  echo "<div>\n";
  echo "<table class='tablinks-title'>\n";
- echo "<tr colspan=2><td><p class='tablinks-title'>".$in_table_metadata["title"]."</p></td></tr>\n";
+ if(isset($in_table_metadata["title"])) {
+  echo "<tr colspan=2><td><p class='tablinks-title'>".$in_table_metadata["title"]."</p></td></tr>\n";
+  }
  echo "<tr>\n";
  if(isset($in_table_metadata["new-form-title"])) {
   echo "<td>";
@@ -1232,6 +1289,22 @@ function finish_output($in_format='html') {
 
  switch($in_format){
   case "html":
+   if(@$GLOBALS["output_debug_msgs"]) {
+     echo "<br /><div>\n";
+     echo "<h2>Debug Messages:</h2>\n";
+    foreach($GLOBALS["outmsgs"]["debug"] as $debug_msg) {
+     echo "<p>".$debug_msg."</p>\n";
+     echo "</div>\n";
+     }
+    }
+   if(@$GLOBALS["output_trace_msgs"]) {
+     echo "<br /><div>\n";
+     echo "<h2>Trace Messages:</h2>\n";
+    foreach($GLOBALS["outmsgs"]["trace"] as $trace_msg) {
+     echo "<p>".$trace_msg."</p>\n";
+     echo "</div>\n";
+     }
+    }
    echo "</main>\n";
    echo "</body>\n";
    echo "</html>\n";
@@ -1308,7 +1381,9 @@ function output_table_noneditable($in_which_table,$in_rows_array) {
 
  # Begin generating our table
  echo "<table class='non-editable-table'>\n";
- echo "<caption class='form-top'>Current ".$table_metadata["title"]."</caption>\n";
+ if(isset($table_metadata["title"])) {
+  echo "<caption class='form-top'>Current ".$table_metadata["title"]."</caption>\n";
+  }
 
  # Options flag - set if we have an extra column for the user to do things to
  # the row, like delete or row methods.
@@ -2344,6 +2419,7 @@ function open_database($in_filename) {
  # These are tables used internally that are not part of the schema.
  # If these happen to conflict with any defined in the schema, the schema
  # will be ignored.
+ mtrace("DB op: open_database($in_filename)");
  $nonschema_table_sql=Array(
   "internal"	=>"CREATE TABLE internal (nlog INTEGER NOT NULL, lockedwithkey TEXT);",
   "log"		=>"CREATE TABLE log (id INTEGER NOT NULL PRIMARY KEY, source TEXT NOT NULL, eventdesc TEXT NOT NULL, event TEXT NOT NULL, timestamp TEXT NOT NULL, offer_event_view TEXT NOT NULL, button_type TEXT NOT NULL, button_type_target TEXT NOT NULL);",
@@ -2365,40 +2441,109 @@ function open_database($in_filename) {
 
  # Now, let's look at the database and see what's missing.
  $missing_tables=array();
- $statement=$GLOBALS["dbo"]->prepare("SELECT * FROM sqlite_master WHERE type='table'");
+ $sql="SELECT * FROM sqlite_master WHERE type='table'";
+  mtrace("sql: \"$sql\"");
+ $statement=$GLOBALS["dbo"]->prepare($sql);
  $results=$statement->execute();
+
  foreach($required_tables as $required_table) {
   $found=false;
   while($row=$results->fetchArray()){
    if(($row["name"]===$required_table)){ $found=true; break; }
    }
-  if(!$found) { $missing_tables[]=$required_table; };
+  if(!$found) {
+   mtrace("database is missing table \"$required_table\", going to add");
+   $missing_tables[]=$required_table;
+   };
   }
 
  $init_internal_table=false;
 
  # Now, create any missing tables if needed.
- foreach($missing_tables as $missing_table) {
-  if(isset($nonschema_table_sql[$missing_table])) {
-   $sql=$nonschema_table_sql[$missing_table];
-  }else{
-   $sql=sql_to_make_table_from_schemadef($missing_table);
+ if(count($missing_tables)>0) {
+  begin_sql_transaction(); 
+  foreach($missing_tables as $missing_table) {
+   if(isset($nonschema_table_sql[$missing_table])) {
+    $sql=$nonschema_table_sql[$missing_table];
+   }else{
+    $sql=sql_to_make_table_from_schemadef($missing_table);
+    mtrace("sql: \"$sql\"");
+    }
+   if($missing_table==="internal") { $init_internal_table=true; }
+   $result=$GLOBALS["dbo"]->exec($sql);
+    if(any_db_error()) { end_any_sql_transaction(); return; }
    }
-  if($missing_table==="internal") { $init_internal_table=true; }
-  $result=$GLOBALS["dbo"]->exec($sql);
-  mdebug("Table '".$missing_table."' was missing in database '".$in_filename."' and was created.");
+
+  # Initialize the internal table if needed.
+  if($init_internal_table) {
+   mtrace("initializing internal table");
+   $init_data=Array("nlog"=>0);
+   insert_row("internal",$init_data);
+    if(any_db_error()) { end_any_sql_transaction(); return; }
+   log_entry("app","database created","A new, empty database has been created.");
+    if(any_db_error()) { end_any_sql_transaction(); return; }
+   }
+  $GLOBALS["sqltxn_commit"]=true; # successful at this point.
+  end_any_sql_transaction(); 
+  } else {
+   mtrace("no missing tables");
   }
 
- # Initialize the internal table if needed.
- if($init_internal_table) {
-  $init_data=Array("nlog"=>0);
-  insert_row("internal",$init_data);
-  log_entry("app","database created","A new, empty database has been created.");
+ }
+
+
+function begin_sql_transaction() {
+ mtrace("DB op: begin_sql_transaction()");
+
+ # We can't do anything if database isn't open.
+ if(!isset($GLOBALS["dbo"])){
+  mtrace("begin_sql_transaction: database not open");
+  return false;
   }
+ $sql="BEGIN TRANSACTION";
+  mtrace("sql: \"$sql\"");
+ $statement=$GLOBALS["dbo"]->prepare("BEGIN TRANSACTION");
+ $results=$statement->execute();
+ $GLOBALS["sqltxn_commit"]=false;
+  mtrace("sqltxn_commit set to false");
+ return true;
+ }
+
+
+function end_any_sql_transaction() {
+ mtrace("DB op: end_any_sql_transaction()");
+
+ # Nothing to do if database wasn't ever opened.
+ if(!isset($GLOBALS["dbo"])){
+  mtrace("end_any_sql_transaction: database not open");
+  return false;
+  }
+ # Nothing to do if a transaction wasn't started.
+ if(!isset($GLOBALS["sqltxn_commit"])) {
+  mtrace("end_any_sql_transaction: sqltxn_commit not set");
+  return false;
+  }
+ $sql="";
+ if($GLOBALS["sqltxn_commit"]) {
+  $sql="COMMIT";
+  } else {
+  $sql="ROLLBACK";
+  }
+  mtrace("sql: \"$sql\"");
+ $statement=$GLOBALS["dbo"]->prepare($sql);
+ $results=$statement->execute();
+ unset($GLOBALS["sqltxn_commit"]);
+  mtrace("sqltxn_commit unset");
  }
 
 
 function log_entry($in_source,$in_eventdesc,$in_eventbody,$offer_event_view=false,$button_type="none",$button_type_target="none") {
+# Adds an entry to the log (a.k.a. "action history").
+# Rotates an entry out if it's full. Rotating out includes making sure
+# anythimg in the trashcan that has a button on the log is removed as well.
+#
+# Returns true if no database error occured, false if one did.
+
  # We can't do anything if database isn't open.
  if(!isset($GLOBALS["dbo"])){ return false; }
  # Add it to the log table.
@@ -2411,6 +2556,7 @@ function log_entry($in_source,$in_eventdesc,$in_eventbody,$offer_event_view=fals
 		  ,"button_type_target"=>$button_type_target
 		  );
  insert_row("log",$log_entry);
+ if(any_db_error()){ return false; }
  $i1=Array(); $i1=read_table_all_rows("internal");
  $i=$i1[0];
 
@@ -2421,6 +2567,7 @@ function log_entry($in_source,$in_eventdesc,$in_eventbody,$offer_event_view=fals
   # Before we kick it out, we have to read it ...
   $statement=$GLOBALS["dbo"]->prepare("SELECT * FROM log WHERE rowid = (SELECT MIN(rowid) FROM LOG)");
   $results=$statement->execute();
+  if(any_db_error()){ return false; }
   $row=$results->fetchArray(SQLITE3_ASSOC); # TODO: test >1 row
   # and check if the log entry has any buttons.
   if($row["button_type"]!=="none") {
@@ -2435,15 +2582,17 @@ function log_entry($in_source,$in_eventdesc,$in_eventbody,$offer_event_view=fals
   # Now remove the oldest log entry row.
   $statement=$GLOBALS["dbo"]->prepare("DELETE FROM log WHERE rowid = (SELECT MIN(rowid) FROM LOG)");
   $results=$statement->execute();
-
+  if(any_db_error()){ return false; }
   }
 
  # If there are not 10 lines in the log, we just increment the count.
  if($i["nlog"]<=9) {
   $i["nlog"]++;
   update_row("internal",$i,"rowid",1);
+  if(any_db_error()){ return false; }
   }
 
+ return true;
  }
 
 
@@ -2655,6 +2804,26 @@ function delete_row($in_which_table, $in_target) {
 # ----------------------------------------------------------------------------
 
 
+function any_db_error() {
+# Checks if there is a database error.
+# If there is no error, returns false.
+# If there is, it will also:
+# - set $GLOBALS["sqltxn_commit"] to false which will make
+#   end_any_sql_transaction() do a rollback when called,
+# - issues an merr() reporting the error.
+# - return true.
+# This function enables generators and row methods to simply do this to handle
+# database errors:
+#   if(any_db_error()) { return false; }
+
+ if($GLOBALS["dbo"]->lastErrorCode()==0) { return false; }
+ # Report database error.
+ merr("Database error: ".$GLOBALS["dbo"]->$lastErrorMsg);
+ # Indicate we need a rollback if there is an error.
+ $GLOBALS["sqltxn_commit"]=false;
+ return true;
+ }
+
 function open_database_2($in_filename) {
  # Does not consult schema.
  # Open 2nd handle to database, read only.
@@ -2838,12 +3007,15 @@ function read_table_filtered_rows(
  }
 
 
-function delete_all_rows_bypass_schema( $in_which_table ) {
+function delete_all_rows_bypass_schema($in_which_table) {
 # Does not consult schema.
 # Assumes $in_which_table exists in database.
 # Deletes all rows in table.
+ mtrace("DB op: delete_all_rows_bypass_schema($in_which_table)");
 
- $statement=$GLOBALS["dbo"]->prepare("DELETE FROM ".$in_which_table);
+ $sql="DELETE FROM ".$in_which_table;
+  mtrace("sql: \"$sql\"");
+ $statement=$GLOBALS["dbo"]->prepare($sql);
  $results=$statement->execute();
  }
 
@@ -2859,14 +3031,17 @@ function delete_row_bypass_schema(
 # - Intended to be called by generators or row methods that need to manipulate
 #   the database as a side effect instead of in direct service to the incoming
 #   request.
+ mtrace("DB op: delete_row_bypass_schema($in_which_table, $in_allow_delete, $in_target, $in_backref)");
 
  if($in_backref) { 
   delete_backref($in_which_table,$in_allow_delete,$in_target);
   }
-
- $table_metadata=Array();
- $statement=$GLOBALS["dbo"]->prepare("DELETE FROM ".$in_which_table." WHERE ".$in_allow_delete." = :in_target");
+# $table_metadata=Array();
+ $sql="DELETE FROM ".$in_which_table." WHERE ".$in_allow_delete." = :in_target";
+  mtrace("sql: \"$sql\"");
+ $statement=$GLOBALS["dbo"]->prepare($sql);
  $statement->bindValue(":in_target",$in_target,SQLITE3_TEXT);
+  mtrace("parameters: in_target=\"$in_target\"");
  $results=$statement->execute();
  }
 
@@ -2895,7 +3070,11 @@ function set_globals($in_user="",$in_hostname="",$in_this_script_name="") {
  # are later emitted when appropriate.
  $GLOBALS["outmsgs"]="";		# Holds messages to be emitted.
  # Types of messages that can be array_pushed() to the "stack":
- $GLOBALS["outmsgs"]=Array("errors"=>Array(),"notices"=>Array(),"buttons"=>Array(),"debug"=>Array());
+ $GLOBALS["outmsgs"]=Array("errors"=>Array(),
+			   "notices"=>Array(),
+			   "buttons"=>Array(),
+			   "debug"=>Array(),
+			   "trace"=>Array());
 
  # "Suspect" flags - set if something is encountered that could be suspicious.
  $GLOBALS["suspect_hack_flag"]=false;
@@ -2926,13 +3105,11 @@ function set_globals($in_user="",$in_hostname="",$in_this_script_name="") {
  $GLOBALS["username"]=$in_user;
  $GLOBALS["hostname"]=$in_hostname;
  $GLOBALS["scriptname"]=$in_this_script_name;
- 
  }
 
 function ingest_ini($in_ini_filename) {
 # Reads the .INI file (containing configuration) with parse_ini_file().
 # Does some checks, raising an error with merr() if needed.
-
  if(!file_exists($in_ini_filename)) {
   merr("Welcome! There's no .ini file yet. To continue, please create an .ini file at <code>$in_ini_filename</code>.");
   return Array();
@@ -2942,7 +3119,7 @@ function ingest_ini($in_ini_filename) {
   merr("Unable to read .ini file.");
   return Array();
   }
- if(@$out_ini["readonly"]==="yes"){ $GLOBALS["readonly"]=true; }
+ if(@$out_ini["readonly"]==="yes") { $GLOBALS["readonly"]=true; }
  if(isset($out_ini["general"]["timezone"])) { 
   $result=date_default_timezone_set($out_ini["general"]["timezone"]);
   if($result) {
@@ -2950,6 +3127,7 @@ function ingest_ini($in_ini_filename) {
    $GLOBALS["timezone"]=$out_ini["general"]["timezone"];
    }
   }
+ mtrace(".ini file read (\"".$in_ini_filename."\")");
  return $out_ini;
  }
 
@@ -2989,9 +3167,9 @@ function style_sheet() {
  echo ".rowmethod-container { padding: 1px; margin: 1px; text-align: right; background-color: blue; color: darkgrey; }\n";
  echo ".rowmethod-button { background-color: lightgrey; border: solid; border-width: 1px; margin: 2px 2px 2px 2px; }\n";
  echo ".rowmethod-button:active { color: white; }\n";
- echo ".stdout-top { font-style: italic; margin: 0px 0px 0px 0px; padding: 16px 0px 0px 0px; }\n";
  echo ".stdout { font-family: monospace; font-size: 0.9rem; width: 100%; }\n";
-
+ echo ".stdout-top { font-style: italic; margin: 0px 0px 0px 0px; padding: 16px 0px 0px 0px; }\n";
+ echo ".tt { font-family: monospace; }\n";
  echo ".form-column-header          { font-size: 1rem; width: 30%; padding: 0px 0px 0px 0px; vertical-align: middle; background-color: #c0c0c0; border: 1px solid #ffffff; }\n";
  echo ".form-column-header-full     { font-size: 1rem; width: 100%; padding: 0px 0px 0px 0px; vertical-align: middle; background-color: #c0c0c0; border: 1px solid #ffffff; }\n";
  echo ".form-column-data            { font-size: 1rem; padding: 0px; vertical-align: middle; }\n";
@@ -3033,12 +3211,33 @@ function is_blacklisted($in_command) {
   $dir=substr($in_command,0,$split+1);
   $exe=substr($in_command,$split+1);
   }
- # No relative dir references allowed.
- # TODO: Make this actually work
-# if(str_contains($dir,".")){
-#  merr("executable blocked - relative paths (paths with dots) not allowed");
-#  return true;
-#  }
+ # Directory must begin with a slash.
+ if(!str_starts_with($dir,"/")) {
+  merr("The full path of executables must be specified (must begin with a '/'.");
+  return true;
+  }
+ # No double dots after slashes or dollar signs allowed.
+ $not_ok=false;
+ $slash_mode=false;
+ for($i=0;$i<strlen($dir);$i++) {
+  if($slash_mode) {
+   if(($string[$i]===".") and ($string[$i-1]===".")) {
+    merr("Executable paths containing two dots '/../' are blacklisted.");
+    $not_ok=true;
+    break;
+    }
+   if($string[$i]!==".") { $slash_mode=false; }
+   } 
+  if($in_string[$i]==="$") {
+   merr("Executable paths with dollar signs ('$') are blacklisted.");
+   $not_ok=true;
+   break;
+   }
+  if($in_string[$i]==="/") {
+   $slash_mode=true;
+   }
+  }
+ if($not_ok) { return true; }
  # test dirs
  # if dir starts with allowed dir, it's OK
  $dir_tested_ok=false;

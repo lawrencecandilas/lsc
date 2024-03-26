@@ -3,7 +3,9 @@
 
 A *service* is a simply a command, that takes a filename, URL prefix, and/or a port number as part of its arguments. These types of commands might be ones that run in the background once started, then serve files over the network; these also may be something you wish to start and stop remotely.
 
-`lsc.php` gets a couple setting from an .INI file, and also uses an SQLite database to store addiitional settings and application state.
+`lsc.php` gets a couple setting from an .INI file, and also uses SQLite to store configuration and application state.
+
+`lsc.php` uses the tailCustom function from lorenzos (https://gist.github.com/lorenzos/1711e81a9162320fde20) and the guidv4 function from https://www.uuidgenerator.net/dev-corner/php (based on an answer at https://stackoverflow.com/questions/2040240/php-function-to-generate-v4-uuid/15875555#15875555).
 
 ### Installation
 `lsc.php` is a PHP application, so you will need a web server such as Apache running and setup to handle PHP scripts. You may want to use php-fpm or other configuration that allows `lsc.php` as a different local user than `www-data` for security purposes.  
