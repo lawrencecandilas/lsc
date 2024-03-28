@@ -1,7 +1,6 @@
 <?php
 error_reporting(E_ALL);
 ini_set('display_errors','On');
-$format='html';
 
 # Get script name; used to generate URL links.
 $my_name_tmp=explode('/',$_SERVER['SCRIPT_NAME']);
@@ -14,8 +13,16 @@ $my_name=$my_name_tmp[array_key_last($my_name_tmp)];
 $user=get_current_user(); $hostname=gethostname();
 
 set_globals($user,$hostname,$my_name);
-$GLOBALS["output_trace_msgs"]=false;
-$GLOBALS["output_debug_msgs"]=false;
+$GLOBALS["output_format"]="text";
+$GLOBALS["output_buffer"]["html"]=Array();
+$GLOBALS["output_buffer"]["text"]=Array();
+$GLOBALS["output_buffer"]["text"]["error"]=Array();
+$GLOBALS["output_buffer"]["text"]["notice"]=Array();
+$GLOBALS["output_buffer"]["text"]["data"]=Array();
+$GLOBALS["output_buffer"]["text"]["table"]=Array();
+$GLOBALS["output_buffer"]["text"]["table-row"]=Array();
+$GLOBALS["output_trace_msgs"]=true;
+$GLOBALS["output_debug_msgs"]=true;
 
 # === MASTER SCHEMA DEFINITION
 # - Defines tables and columns.
@@ -135,11 +142,11 @@ function HOMEPAGE() {
 # Called when the action is "show" and the table is "none."
 
  # Friendly introduction.
- echo "<p>This is <span class='tt'>lsc</span> - Lawrence's Service Controller.</p>\n";
- echo "<p><span class='tt'>lsc</span> allows you to define <i>services</i>, and once defined, start and stop them.</p>\n";
- echo "<p>A service is a command that takes a filename, URL prefix, and/or a port number as part of its arguments.  These types of commands typically serve files over your network or the Internet and may be something you wish to conveniently start and stop remotely.</p>\n";
- echo "<p>If this is a new instance, you will first need to whitelist your desired executables in <code>lsc</code>'s .INI file (<span class='tt'>/etc/lsc/".$GLOBALS["username"]."/lsc.ini</span>).  Then create a configuration.  Next, you'll want to define some locations, a service or two, and after that, you can start and stop them from this interface.</p>\n";
- echo "<p><span class='tt'>lsc</span> as shipped will not run as root, can only launch executables that are whitelisted, will not run setuid/setgid executables, and can only manage services it has started that are running under the same local user account as itself.  There is also an internal blacklist of executable names <span class='tt'>lsc</span> will refuse to run, such as <span class='tt'>/bin/rm</span>.</p>\n";
+ htmlout("<p>This is <span class='tt'>lsc</span> - Lawrence's Service Controller.</p>");
+ htmlout("<p><span class='tt'>lsc</span> allows you to define <i>services</i>, and once defined, start and stop them.</p>");
+ htmlout("<p>A service is a command that takes a filename, URL prefix, and/or a port number as part of its arguments.  These types of commands typically serve files over your network or the Internet and may be something you wish to conveniently start and stop remotely.</p>");
+ htmlout("<p>If this is a new instance, you will first need to whitelist your desired executables in <code>lsc</code>'s .INI file (<span class='tt'>/etc/lsc/".$GLOBALS["username"]."/lsc.ini</span>).  Then create a configuration.  Next, you'll want to define some locations, a service or two, and after that, you can start and stop them from this interface.</p>");
+ htmlout("<p><span class='tt'>lsc</span> as shipped will not run as root, can only launch executables that are whitelisted, will not run setuid/setgid executables, and can only manage services it has started that are running under the same local user account as itself.  There is also an internal blacklist of executable names <span class='tt'>lsc</span> will refuse to run, such as <span class='tt'>/bin/rm</span>.</p>");
  }
 
 # ----------------------------------------------------------------------------
@@ -344,6 +351,7 @@ function ROWMETHOD_execute_maint(
 
  }
 
+
 function ROWMETHOD_check_running( 
  $in_table, $in_target, $in_target_table, $in_PARAMS, $in_ini
  ) {
@@ -385,6 +393,7 @@ function ROWMETHOD_check_running(
   } 
 
  }
+
 
 function ROWMETHOD_stop_running(
  $in_table, $in_target, $in_target_table, $in_PARAMS, $in_ini
@@ -434,10 +443,47 @@ function ROWMETHOD_stop_running(
 
  }
 
+
+function ROWMETHOD_stdout_running (
+ $in_table, $in_target, $in_target_table, $in_PARAMS,
+ $in_ini
+ ) {
+
+ # Resolve reference to running process.
+ $rrunning=Array();
+ if(!read_row_expecting_just_one($rrunning,$in_target_table,"uuid",$in_target)) { return false; }
+
+ # Running process also points to a defined process.
+ # Resolve that too...
+ $pdefined=$rrunning["pointer_to_defined"];
+ $rdefined=Array();
+ if(!read_row_expecting_just_one($rdefined,"defined","uuid",$pdefined)) { return false; }
+
+ # Defined process also points to a conf.
+ # We really need that.
+ $pconf=$rdefined["pointer_to_conf"];
+ $rconf=Array(); 
+ if(!read_row_expecting_just_one($rconf,"conf","uuid",$pconf)) { return false; }
+
+ # Assemble stdoutpath (path from config, filename from service definition).
+ $stdoutpath=path_merge(trim($rconf["stdoutfilepath"]),trim(make_filename_ready($rdefined["name"])."-stdout.txt"));
+
+ $GLOBALS["extra_goodies"].="<div class='stdout-top'>Last 50 lines of captured <tt>stdout</tt>:</div>\n";
+ $GLOBALS["extra_goodies"].="<textarea rows=25 class='stdout'>";
+ $GLOBALS["extra_goodies"].=tailCustom($stdoutpath,50);
+ $GLOBALS["extra_goodies"].="</textarea>";
+
+ return true;
+ }
+
+
 function ROWMETHOD_restart_trashcan (
  $in_table, $in_target, $in_target_table, $in_PARAMS,
  $in_ini
  ) {
+ # Not invocable directly from the interface - but indirectly through buttons in
+ # the action history.
+
  
  # Resolve reference to piece of trash.
  $rpiece_of_trash=Array();
@@ -747,7 +793,7 @@ switch ($ACTION) {
  }
 
 # Begin outputting HTML.
-start_output($format,$P["table"]);
+start_output($P["table"]);
 
 # Report results of action, in a manner dependent upon the specific action.
 # - Action "show" (which is default if none is specified), will output the
@@ -773,14 +819,14 @@ switch ($ACTION) {
    output_messages();
    content_panel_end();
   history_panel_start();
-  echo "<p class='return-link'><a href='".$return_link."'>[OK]</a></p>\n";
+  htmlout("<p class='return-link'><a href='".$return_link."'>[OK]</a></p>");
   break; 
  case "delete_row":
   content_panel_start($table,$ACTION);
    output_messages();
    content_panel_end();
   history_panel_start();
-  echo "<p class='return-link'><a href='".$return_link."'>[OK]</a></p>\n";
+  htmlout("<p class='return-link'><a href='".$return_link."'>[OK]</a></p>");
   break; 
  case "row_method_actio":
  case "clear_logs":
@@ -788,16 +834,16 @@ switch ($ACTION) {
    output_messages();
    content_panel_end();
   history_panel_start();
-  echo "<p class='return-link'><a href='".$return_link."'>[OK]</a></p>\n";
+  htmlout("<p class='return-link'><a href='".$return_link."'>[OK]</a></p>");
   break; 
  case "show":
-  if($table=="none") { null_request($format); break; }
+  if($table=="none") { null_request(); break; }
   if(any_errors()) { 
    content_panel_start($table,$ACTION);
     output_messages();
     content_panel_end();
    history_panel_start();
-   echo "<p class='return-link'><a href='".$my_name."'>[Home]</a></p>\n";
+   htmlout("<p class='return-link'><a href='".$my_name."'>[Home]</a></p>");
    break;
    }
   $rows=Array();
@@ -822,29 +868,61 @@ history_panel_end();
 # Output any generated Javascript.
 # - Javascript is used to populate default values in form fields when the
 #   a list item that provides default values changes selection.
-echo "<script type='text/javascript'>\n";
-echo $GLOBALS["js"];
-echo "</script>\n";
+htmlout("<script type='text/javascript'>");
+htmlout($GLOBALS["js"]);
+htmlout("</script>\n");
 
 # Wrap it up.
-finish_output($format);
+finish_output();
+
+switch ($GLOBALS["output_format"]) {
+ case "text":
+  foreach($GLOBALS["output_buffer"]["text"]["error"] as $text_line) {
+   echo "Error: ".$text_line."\n";
+   }
+  foreach($GLOBALS["output_buffer"]["text"]["notice"] as $text_line) {
+   echo $text_line."\n";
+   }
+  if(count($GLOBALS["output_buffer"]["text"]["data"])>0) {
+   echo "-----------------------------------------------------------------------------\n";
+   foreach($GLOBALS["output_buffer"]["text"]["data"] as $text_line) {
+    echo $text_line."\n";
+    }
+   echo "-----------------------------------------------------------------------------\n";
+   }
+  if(isset($GLOBALS["output_buffer"]["text"]["table-row"])) {
+   foreach($GLOBALS["output_buffer"]["text"]["table-row"] as $text_line) {
+    echo $text_line."\n";
+    }
+   }
+  break;
+ case "html":
+  foreach($GLOBALS["output_buffer"]["html"] as $html_line) {
+   echo $html_line;
+   }
+  break;
+ }
 exit;
 
 # ----------------------------------------------------------------------------
 # [ Row method handling functions ]
 # ----------------------------------------------------------------------------
 
-function null_request($in_format) { 
- switch ($in_format) {
+function null_request() { 
+ switch ($GLOBALS["output_format"]) {
+  case "text":
+   textout("notice","Null request received, did nothing.");
+   break;
   case "html":
    if(is_callable("HOMEPAGE")){
     HOMEPAGE();
    }else{
-    echo "<p>Please select a table.</p>";
+    htmlout("<p>Please select a table.</p>");
    }
   break;
   }
  }
+
 
 function row_method_action(
  $in_row_method,
@@ -1122,6 +1200,7 @@ function make_filename_ready($in_string) {
 # Take incoming string and make it a well behaved filename.
 
  if(is_null($in_string)) { return guidv4(); }
+ $out_string="";
  for($i=0;$i<strlen($in_string);$i++){
   if(str_contains('\\/?* @$&:;,.><|',$in_string[$i])) {
    $out_string.='_';
@@ -1153,7 +1232,7 @@ function timestamp_to_string($in_timestamp) {
 # ----------------------------------------------------------------------------
 
 
-function start_output($in_format, $in_table) {
+function start_output($in_table) {
 # Begin generating output.
 # - For HTML, we'll start the html, body, and main tags, and take care of the
 #   head element as well.
@@ -1161,41 +1240,43 @@ function start_output($in_format, $in_table) {
 #   finish_output()
  $tbl="none"; if(isset($in_table)and($in_table!="")){ $tbl=$in_table; }
 
- switch($in_format){
+ switch($GLOBALS["output_format"]){
+  case "text":
+   break;
   case "html":
-   echo "<!doctype html>\n";
-   echo "<html>\n";
-   echo "<head>\n";
-   echo "<title>lsc.php 20240322</title>\n";
+   htmlout("<!doctype html>");
+   htmlout("<html>");
+   htmlout("<head>");
+   htmlout("<title>lsc.php 20240327</title>");
    style_sheet();
-   echo "</head>\n";
-   echo "<body>\n";
-   echo "<main>\n";
-   echo "<div id='app-header'>\n";
-   echo "<table><tr><td><h2>lsc</h2></td><td><h2 style='text-align: right'>".$GLOBALS["username"]."@".$GLOBALS["hostname"]."</span></h2></td></tr></table>\n";
-   echo "<table>\n";
+   htmlout("</head>");
+   htmlout("<body>");
+   htmlout("<main>");
+   htmlout("<div id='app-header'>");
+   htmlout("<table><tr><td><h2>lsc</h2></td><td><h2 style='text-align: right'>".$GLOBALS["username"]."@".$GLOBALS["hostname"]."</span></h2></td></tr></table>");
+   htmlout("<table>");
 
-   echo "<tr class='toplink-box-row'>\n";
-   echo "<td class='toplink-box ";
-   if($tbl==="none") { echo "toplink-selected'"; } else { echo "toplink-not-selected'"; }
-   echo "><p><a class='toplink' href='".$GLOBALS["scriptname"]."'>home</a></p></td>\n";
+   htmlout("<tr class='toplink-box-row'>");
+   htmloutp("<td class='toplink-box ");
+   if($tbl==="none") { htmloutp("toplink-selected'"); } else { htmloutp("toplink-not-selected'"); }
+   htmloutp("><p><a class='toplink' href='".$GLOBALS["scriptname"]."'>home</a></p></td>",1);
 
    foreach($GLOBALS["schemadef"] as $tblcolname=>$colattrs) {
    if(!str_ends_with($tblcolname,"FOR_THIS_APP")) { continue; }
     $split_tblcolname=Array(); $split_tblcolname=explode('/',$tblcolname);
     $attrs=schema_rowattr($tblcolname);
     if(isset($attrs["toplink"])) {
-     echo "<td class='toplink-box ";
-     if($split_tblcolname[0]===$tbl) { echo "toplink-selected'"; } else { echo "toplink-not-selected'"; }
-     echo "><p><a class='toplink' href='".$GLOBALS["scriptname"]."?table=".$split_tblcolname[0]."'>".$attrs["toplink"]."</a></p></td>\n";
+     htmloutp("<td class='toplink-box ");
+     if($split_tblcolname[0]===$tbl) { htmloutp("toplink-selected'"); } else { htmloutp("toplink-not-selected'"); }
+     htmloutp("><p><a class='toplink' href='".$GLOBALS["scriptname"]."?table=".$split_tblcolname[0]."'>".$attrs["toplink"]."</a></p></td>",1);
      }
     }
-   echo "</tr>\n";
+   htmlout("</tr>");
 
-   echo "</table>\n";
-   echo "</div>\n";
-   break;
-  }
+   htmlout("</table>");
+   htmlout("</div>");
+   break; # /case "html";
+  } # /switch;
  }
 
 function output_messages() {
@@ -1203,26 +1284,47 @@ function output_messages() {
 # - This would be any errors, notices, and action results generated when
 #   processing actions or methods.
 
- # Output errors
- foreach($GLOBALS["outmsgs"]["errors"] as $M1){
-  if($M1===""){ continue; }
-  echo "<p>⚠️ ".$M1."</p>\n";
-  }
- # Output notices.
- foreach($GLOBALS["outmsgs"]["notices"] as $M1){
-  if($M1===""){ continue; }
-  echo "<p>👀 ".$M1."</p>\n";
-  }
- # Output buttons.
- foreach($GLOBALS["outmsgs"]["buttons"] as $M1){
-  if($M1===""){ continue; }
-  echo "<p>".$M1."</p>\n";
-  }
- # Output any extra goodies if there are any.
- if($GLOBALS["extra_goodies"]!=="") {
-  echo "<div>\n";
-  echo $GLOBALS["extra_goodies"];
-  echo "</div>\n";
+ switch ($GLOBALS["output_format"]) { 
+  case "text":
+   foreach($GLOBALS["outmsgs"]["errors"] as $M1){
+    if($M1===""){ continue; }
+    textout("error",$M1);
+    }
+   # Output notices.
+   foreach($GLOBALS["outmsgs"]["notices"] as $M1){
+    if($M1===""){ continue; }
+    textout("notice",$M1);
+    }
+   # Output any extra goodies if there are any.
+   if($GLOBALS["extra_goodies"]!=="") {
+    foreach($GLOBALS["extra_goodies"] as $M1) {
+     textout("data",$M1);
+     }
+    }
+   break;
+  case "html":
+   # Output errors
+   foreach($GLOBALS["outmsgs"]["errors"] as $M1){
+    if($M1===""){ continue; }
+    htmlout("<p>⚠️ ".$M1."</p>");
+    }
+   # Output notices.
+   foreach($GLOBALS["outmsgs"]["notices"] as $M1){
+    if($M1===""){ continue; }
+    htmlout("<p>👀 ".$M1."</p>");
+    }
+   # Output buttons.
+   foreach($GLOBALS["outmsgs"]["buttons"] as $M1){
+    if($M1===""){ continue; }
+    htmlout("<p>".$M1."</p>");
+    }
+   # Output any extra goodies if there are any.
+   if($GLOBALS["extra_goodies"]!=="") {
+    htmlout("<div>");
+    htmlout($GLOBALS["extra_goodies"]);
+    htmlout("</div>");
+    }
+   break;
   }
  }
 
@@ -1230,38 +1332,44 @@ function output_messages() {
 # We use two - a content (left) panel and a history (right) panel.
 # ----------------------------------------------------------------------------
 function content_panel_start($in_which_table,$in_action) {
- echo "<div style='width: 70%; margin: 4px 4px 4px 4px; float: left;'>\n";
- if($in_which_table==="none") {
-  return; 
+ if($GLOBALS["output_format"]!=="html") { return; } # HTML format only.
+ htmlout("<div style='width: 70%; margin: 4px 4px 4px 4px; float: left;'>");
+ if($in_which_table==="none") { 
+  return;
+ } else {
+  $table_metadata=schema_rowattr($in_which_table.'/FOR_THIS_APP');
+  content_top($table_metadata);
   }
- $table_metadata=schema_rowattr($in_which_table.'/FOR_THIS_APP');
- content_top($table_metadata);
  }
 
 function content_panel_end() {
- echo "</div>\n";
+ if($GLOBALS["output_format"]!=="html") { return; } # HTML format only.
+ htmlout("</div>");
  }
 function history_panel_start() {
- echo "<div style='margin: 4px 4px 4px 4px; overflow: hidden; background-color: #e0e0e0;'>\n";
+ if($GLOBALS["output_format"]!=="html") { return; } # HTML format only.
+ htmlout("<div style='margin: 4px 4px 4px 4px; overflow: hidden; background-color: #e0e0e0;'>");
  }
 function history_panel_end() {
- echo "</div>\n";
+ if($GLOBALS["output_format"]!=="html") { return; } # HTML format only.
+ htmlout("</div>");
  }
 
 function content_top($in_table_metadata) {
- echo "<div>\n";
- echo "<table class='tablinks-title'>\n";
+ if($GLOBALS["output_format"]!=="html") { return; } # HTML format only.
+ htmlout("<div>");
+ htmlout("<table class='tablinks-title'>");
  if(isset($in_table_metadata["title"])) {
-  echo "<tr colspan=2><td><p class='tablinks-title'>".$in_table_metadata["title"]."</p></td></tr>\n";
+  htmlout("<tr colspan=2><td><p class='tablinks-title'>".$in_table_metadata["title"]."</p></td></tr>");
   }
- echo "<tr>\n";
+ htmlout("<tr>");
  if(isset($in_table_metadata["new-form-title"])) {
-  echo "<td>";
-  echo "<div class=\"tab\"><p class='tablinks-title'>\n";
-  echo "<button class='tablinks active' onclick='open_tab(event,\"view\");'>View</button> ";
-  echo "<button class='tablinks' onclick='open_tab(event,\"new\");'>Create New</button>";
-  echo "</p></div>";
-  echo "</td>\n";
+  htmlout("<td>");
+  htmlout("<div class=\"tab\"><p class='tablinks-title'>");
+  htmloutp("<button class='tablinks active' onclick='open_tab(event,\"view\");'>View</button> ");
+  htmloutp("<button class='tablinks' onclick='open_tab(event,\"new\");'>Create New</button>");
+  htmloutp("</p></div>");
+  htmloutp("</td>",1);
   $GLOBALS["js"].="function open_tab(in_event, tab_name) {\n";
   $GLOBALS["js"].=" var i, tabcontent, tablinks;\n";
   $GLOBALS["js"].=" tabcontent=document.getElementsByClassName('tabcontent');\n";
@@ -1276,38 +1384,36 @@ function content_top($in_table_metadata) {
   $GLOBALS["js"].=" in_event.currentTarget.className+=' active';\n";
   $GLOBALS["js"].=" };\n";
   } else {
-  echo "<td></td>\n";
+  htmlout("<td></td>");
   }
-  echo "</tr>\n";
-  echo "</table>\n";
-  echo "</div>\n";
+  htmlout("</tr>");
+  htmlout("</table>");
+  htmlout("</div>");
  }
 
-function finish_output($in_format='html') {
+function finish_output() {
 # Finish generating output.
 # - For HTML, we'll wrap up our main, body, and html tags.
 
- switch($in_format){
+ switch($GLOBALS["output_format"]){
   case "html":
+   htmlout("</main>");
+   htmlout("</body>");
+   htmlout("</html>");
    if(@$GLOBALS["output_debug_msgs"]) {
-     echo "<br /><div>\n";
-     echo "<h2>Debug Messages:</h2>\n";
-    foreach($GLOBALS["outmsgs"]["debug"] as $debug_msg) {
-     echo "<p>".$debug_msg."</p>\n";
-     echo "</div>\n";
+     htmlout("<!--"); htmlout("Debug Messages:");
+    foreach($GLOBALS["outmsgs"]["debug"] as $msg) {
+     htmlout($msg);
      }
+     htmlout(" -->");
     }
    if(@$GLOBALS["output_trace_msgs"]) {
-     echo "<br /><div>\n";
-     echo "<h2>Trace Messages:</h2>\n";
-    foreach($GLOBALS["outmsgs"]["trace"] as $trace_msg) {
-     echo "<p>".$trace_msg."</p>\n";
-     echo "</div>\n";
+     htmlout("<!--"); htmlout("Trace Messages:");
+    foreach($GLOBALS["outmsgs"]["trace"] as $msg) {
+     htmlout($msg);
      }
+     htmlout(" -->");
     }
-   echo "</main>\n";
-   echo "</body>\n";
-   echo "</html>\n";
    break;
   }
  }
@@ -1318,56 +1424,56 @@ function finish_output($in_format='html') {
 
 function output_log($in_return_link) {
 # Output log table (history of actions)
+ if($GLOBALS["output_format"]!=="html") { return; } # HTML format only.
 
- echo "<table class='non-editable-table'>\n";
- echo "<caption class='non-editable-table-caption'>Recent Actions</caption>\n";
+ htmlout("<table class='non-editable-table'>");
+ htmlout("<caption class='non-editable-table-caption'>Recent Actions</caption>");
  if(isset($GLOBALS["timezone"])) { 
-  echo "<tr><td class='action-history-event'>Time Zone: ".$GLOBALS["timezone"]."</td></tr>\n";
+  htmlout("<tr><td class='action-history-event'>Time Zone: ".$GLOBALS["timezone"]."</td></tr>");
   } else {
-  echo "<tr><td class='action-history-event'>Dates/Times Are Server Local</td></tr>\n";
+  htmlout("<tr><td class='action-history-event'>Dates/Times Are Server Local</td></tr>");
   }
  $loglines=Array(); 
  $loglines=read_table_all_rows("log");
 
  foreach(array_reverse($loglines) as $logline) {
 
-  echo "<tr><td>";
-  echo "<table class='action-history-container'>";
-  echo "<tr>";
-  echo "<td class='action-history-date'>".timestamp_to_string($logline["timestamp"])."</td>";
-  echo "</tr>";
-  echo "<tr style='border-color: black; border-style: solid;'>";
-  echo "<td class='action-history-event'>".$logline["eventdesc"]."</td>";
-  echo "</tr>";
+  htmlout("<tr><td>");
+  htmlout("<table class='action-history-container'>");
+  htmlout("<tr>");
+  htmlout("<td class='action-history-date'>".timestamp_to_string($logline["timestamp"])."</td>");
+  htmlout("</tr>");
+  htmlout("<tr style='border-color: black; border-style: solid;'>");
+  htmlout("<td class='action-history-event'>".$logline["eventdesc"]."</td>");
+  htmlout("</tr>");
 
   if($logline["button_type"]!="none") {
    $function="BUTTONHTML_".$logline["button_type"];
    if(is_callable($function)) {
-    echo $function($logline["button_type_target"]);
+    htmlout($function($logline["button_type_target"]));
     } else {
     mdebug("No callable BUTTONHTML method available for button type '".$logline["button_type"]."'.");
     } 
    }
 
-  echo "</table>";
-  echo "</td></tr>\n";
-
+  htmlout("</table>");
+  htmlout("</td></tr>");
   }
 
  if(count($loglines)>0) {
-  echo "<tr><td class='logbutton-container'>\n";
-  echo "<form action='".$in_return_link."' method=post>\n";
-  echo "<input class='logbutton' type=submit value='Clear Recent History' />\n";
-  echo "<input type='hidden' id='action' name='action' value='clear_logs' />\n";
-  echo "</form>\n";
-  echo "</td></tr>\n";
+  htmlout("<tr><td class='logbutton-container'>");
+  htmlout("<form action='".$in_return_link."' method=post>");
+  htmlout("<input class='logbutton' type=submit value='Clear Recent History' />");
+  htmlout("<input type='hidden' id='action' name='action' value='clear_logs' />");
+  htmlout("</form>");
+  htmlout("</td></tr>");
   }
- echo "</table>";
+ htmlout("</table>");
  } 
+
 
 function output_table_noneditable($in_which_table,$in_rows_array) {
 # Output a table, not designed for editing.
-# For HTML, applicable delete and row method buttons will appear, though.
 
  # Get a list of columns that are supposed to be in this table, according to
  # the provided schema definition
@@ -1376,20 +1482,18 @@ function output_table_noneditable($in_which_table,$in_rows_array) {
  # Table metadata needed.
  $table_metadata=schema_rowattr($in_which_table."/FOR_THIS_APP");
 
- # Containing div.
- echo "<div style='display: block;' id='view' class='tabcontent'>\n";
-
  # Begin generating our table
- echo "<table class='non-editable-table'>\n";
- if(isset($table_metadata["title"])) {
-  echo "<caption class='form-top'>Current ".$table_metadata["title"]."</caption>\n";
-  }
+ output_table_noneditable_container_start();
+ output_table_noneditable_title($table_metadata["title"]);
 
  # Options flag - set if we have an extra column for the user to do things to
  # the row, like delete or row methods.
  $options=false;
- if(isset($table_metadata["allow-delete-by"])){ $options=true; }
- if(isset($table_metadata['each-row-method'])){ $options=true; }
+ if($GLOBALS["output_format"]==="html") {
+  # Options column is an HTML thing only.
+  if(isset($table_metadata["allow-delete-by"])){ $options=true; }
+  if(isset($table_metadata['each-row-method'])){ $options=true; }
+  }
 
  # Get column headers (thead).
  $headers=Array();
@@ -1399,7 +1503,7 @@ function output_table_noneditable($in_which_table,$in_rows_array) {
   $headers[$col]=$attrs_cols[$col]["form-label"];
   }
 
- # We're gonna output some stuff in a bit.
+ # We're gonna generate some stuff in a bit.
  $deferred=Array();
 
  # Process results from query ...
@@ -1444,7 +1548,9 @@ function output_table_noneditable($in_which_table,$in_rows_array) {
      # Need to use 2nd database object as we are already using the first one.
      # Code outside the calling function should have this object ready.
      #echo $select_this." FROM ".$from_this." WHERE ".$where_this." = '".$row[$is_this_from_original_table];
-     $statement2=$GLOBALS["dbo2"]->prepare("SELECT ".$select_this." FROM ".$from_this." WHERE ".$where_this." = '".$row[$is_this_from_original_table]."'");
+     $sql2="SELECT ".$select_this." FROM ".$from_this." WHERE ".$where_this." = '".$row[$is_this_from_original_table]."'";
+      mtrace("sql2: \"$sql2\"");
+     $statement2=$GLOBALS["dbo2"]->prepare($sql2);
      $results2=$statement2->execute();
      $row2=$results2->fetchArray(SQLITE3_ASSOC);
      if ((is_bool($row2)) and (!$row2)) {
@@ -1462,40 +1568,25 @@ function output_table_noneditable($in_which_table,$in_rows_array) {
      }
 
    # Present the data to show from the row's column.
-   switch (@$attrs["present-width"]) {
-    case "full-width": 
-     echo "<tr>\n";
-     echo "<td colspan=2 class='form-column-header-full'>".$headers[$col]."</td>";
-     echo "</tr>\n";
-     echo "<tr>\n";
-     if($data_to_show===""){$data_to_show="<span class='no-data'><i>No data</i></span>";}
-     echo"<td colspan=2 class='form-column-data-full'>".$data_to_show."</td>\n";
-     echo"</tr>\n";
-     break;
-    default:
-     echo "<tr>\n";
-     echo "<td class='form-column-header'>".$headers[$col]."</td>";
-     if($data_to_show===""){$data_to_show="<span class='no-data'><i>No data</i></span>";}
-     echo"<td class='form-column-data'>".$data_to_show."</td>\n";
-     echo"</tr>\n";
-    }
+   output_table_noneditable_row($attrs,$headers[$col],@$data_to_show);
+
    }
-  #
+
   # Handle options column here.
   if($options) {
-    echo "<td colspan=2 class='rowmethod-container'>\n";
+    htmlout("<td colspan=2 class='rowmethod-container'>");
    if(isset($table_metadata["allow-delete-by"])) {
     $target=$row[$table_metadata["allow-delete-by"]];
     $noun="";
     if(isset($table_metadata["friendly-object-name"])) {
      $noun=" ".$table_metadata["friendly-object-name"];
      }
-    echo  "<form action='".$GLOBALS["scriptname"]."' method=post>\n";
-    echo  "<input class='rowmethod-button' type=submit value='Delete".$noun."' />\n";
-    echo  "<input type='hidden' id='action' name='action' value='delete_row' />\n";
-    echo  "<input type='hidden' id='table' name='table' value='".$in_which_table."' />\n";
-    echo  "<input type='hidden' id='target' name='target' value='".$target."' />\n";
-    echo  "</form>\n";
+    htmlout("<form action='".$GLOBALS["scriptname"]."' method=post>");
+    htmlout("<input class='rowmethod-button' type=submit value='Delete".$noun."' />");
+    htmlout("<input type='hidden' id='action' name='action' value='delete_row' />");
+    htmlout("<input type='hidden' id='table' name='table' value='".$in_which_table."' />");
+    htmlout("<input type='hidden' id='target' name='target' value='".$target."' />");
+    htmlout("</form>");
    }
    if(isset($table_metadata['each-row-method'])) {
     $row_method_list=Array();
@@ -1504,37 +1595,105 @@ function output_table_noneditable($in_which_table,$in_rows_array) {
      $row_method_params=Array();
      $row_method_params=explode(",",$row_method);
      $target=$row[$row_method_params[2]];
-     echo "<form action='".$GLOBALS["scriptname"]."' method=post>\n";
-     echo "<input class='rowmethod-button' type=submit value='".$row_method_params[1]."' />\n";
-     echo "<input type='hidden' id='action' name='action' value='row_method_action' />\n";
-     echo "<input type='hidden' id='row_method' name='row_method' value='".$row_method_params[0]."' />\n";
-     echo "<input type='hidden' id='table' name='table' value='".$in_which_table."' />\n";
-     echo "<input type='hidden' id='target' name='target' value='".$target."' />\n";
-     if(isset($deferred[$row_method_params[0]])){ echo $deferred[$row_method_params[0]]; }
-     echo "</form>\n";
+     htmlout("<form action='".$GLOBALS["scriptname"]."' method=post>");
+     htmlout("<input class='rowmethod-button' type=submit value='".$row_method_params[1]."' />");
+     htmlout("<input type='hidden' id='action' name='action' value='row_method_action' />");
+     htmlout("<input type='hidden' id='row_method' name='row_method' value='".$row_method_params[0]."' />");
+     htmlout("<input type='hidden' id='table' name='table' value='".$in_which_table."' />");
+     htmlout("<input type='hidden' id='target' name='target' value='".$target."' />");
+     if(isset($deferred[$row_method_params[0]])){ htmlout($deferred[$row_method_params[0]]); }
+     htmlout("</form>");
      }
     }
-   echo "</td>\n";
+   htmlout("</td>");
    }
-  # 
+
   # Finish outputting row.
-   echo "</tr>\n";
-   echo "<tr><td colspan=2></td></tr>";
+  output_table_noneditable_row_end();
   }
- # 
+
  # Finish outputting table.
- if(   !isset($table_metadata["single-row-only"])
-  or   !isset($table_metadata["single-row-only-empty-message"]) ) {
-  echo "<td colspan=2 style='text-align: right'>".count($in_rows_array)." object(s)</td>\n";
+ if( !isset($table_metadata["single-row-only"])
+  or !isset($table_metadata["single-row-only-empty-message"]) ) {
+  output_table_noneditable_row_end(count($in_rows_array)." object(s)");
   }else{
    if(count($in_rows_array)==0){
-    echo "<td colspan=2 style='text-align: right'>".$table_metadata["single-row-only-empty-message"]."</td>\n";
+    output_table_noneditable_row_end($table_metadata["single-row-only-empty-message"]);
     }
    }
-  echo "</table>\n";
-  echo "</div>\n";
+  output_table_noneditable_container_end();
  }
 
+
+function output_table_noneditable_container_start() {
+ if($GLOBALS["output_format"]!=="html") { return; }
+ htmlout("<div style='display: block;' id='view' class='tabcontent'>");
+ htmlout("<table class='non-editable-table'>");
+ }
+function output_table_noneditable_title($in_title="Objects") {
+ switch ($GLOBALS["output_format"]) { 
+  case "text":
+   textout("table",$in_title);
+   break;
+  case "html":
+   if($in_title!=="") {
+    htmlout("<caption class='form-top'>Current ".$in_title."</caption>");
+    }
+   break;
+  }
+ }
+function output_table_noneditable_row($attrs=Array(),$header,$data="") {
+ switch ($GLOBALS["output_format"]) {
+  case "text":
+   $text="";
+   if($data==="") { $text="No data"; } else { $text=$data; }
+   textout("table-row",$header.": ".$data);
+   break; # /case "text":
+  case "html":
+   $html="";
+   if($data==="") { 
+    $html="<span class='no-data'><i>No data</i></span>";
+    } else {
+    $html=$data;
+    }
+   switch (@$attrs["present-width"]) {
+    case "full-width": 
+     htmlout("<tr>");
+     htmlout("<td colspan=2 class='form-column-header-full'>".$header."</td>");
+     htmlout("</tr>");
+     htmlout("<tr>");
+     htmlout("<td colspan=2 class='form-column-data-full'>".$html."</td>");
+     htmlout("</tr>");
+     break; # /case "full-width":
+    default:
+     htmlout("<tr>");
+     htmlout("<td class='form-column-header'>".$header."</td>");
+     htmlout("<td class='form-column-data'>".$html."</td>");
+     htmlout("</tr>");
+    } # /switch (@$attrs["present-width"])
+   break; # /case "html":
+  } # /switch ($GLOBALS["output_format"]) 
+ }
+function output_table_noneditable_row_end() {
+ if($GLOBALS["output_format"]!=="html") { return; }
+ htmlout("</tr>");
+ htmlout("<tr><td colspan=2></td></tr>");
+ }
+function output_table_noneditable_bottom($message) {
+ switch ($GLOBALS["output_format"]) {
+  case "text":
+   textout("notice",$message);
+   break;
+  case "html":
+   htmlout("<td colspan=2 style='text-align: right'>".$message."</td>");
+   break;
+  }
+ }
+function output_table_noneditable_container_end() {
+ if($GLOBALS["output_format"]!=="html") { return; }
+ htmlout("</table>");
+ htmlout("</div>");
+ }
 
 # ----------------------------------------------------------------------------
 # ----------------------------------------------------------------------------
@@ -1545,16 +1704,18 @@ function output_new_form($in_which_table,$in_rows_count,$in_ini) {
  # the provided schema definition.
  # A database object ($GLOBALS["dbo"]) is needed to generate lists, if
  # described by the schema.
+ if($GLOBALS["output_format"]!=="html") { return; } # HTML format only.
+
  $cols=columns_from_schemadef($in_which_table);
 
  # Begin generating our form
  
  # Containing div.
- echo "<div style='display: none;' id='new' class='tabcontent'>\n";
+ htmlout("<div style='display: none;' id='new' class='tabcontent'>");
 
  if($GLOBALS["readonly"]) {
-  echo "<p>Database is in read-only mode.</p>\n";
-  echo "</div>\n";
+  htmlout("<p>Database is in read-only mode.</p>");
+  htmlout("</div>");
   return false;
   }
 
@@ -1564,8 +1725,8 @@ function output_new_form($in_which_table,$in_rows_count,$in_ini) {
  # Table attributes that prevent creating new rows.
  # "single-row-only" ...
  if(isset($table_metadata["single-row-only"]) and $in_rows_count==1){ 
-  echo "<p>This table can only hold one object. Remove the object in order to create a new one.</p>\n";
-  echo "</div>\n";
+  htmlout("<p>This table can only hold one object. Remove the object in order to create a new one.</p>");
+  htmlout("</div>");
   return false;
   }
  # "row-must-exist-in" ...
@@ -1574,8 +1735,8 @@ function output_new_form($in_which_table,$in_rows_count,$in_ini) {
   $tmp=read_table_all_rows($table_metadata["row-must-exist-in"]);
   if(count($tmp)==0) {
    if(isset($table_metadata["must-exist-in-fails-message"])) {
-    echo "<p>".$table_metadata["must-exist-in-fails-message"]."</p>\n";
-    echo "</div>\n";
+    htmlout("<p>".$table_metadata["must-exist-in-fails-message"]."</p>");
+    htmlout("</div>");
     return false;
     }
    }
@@ -1600,12 +1761,12 @@ function output_new_form($in_which_table,$in_rows_count,$in_ini) {
   }
 
  # Form header.
- echo "<form action='".$GLOBALS["scriptname"]."' method=post>\n";
- echo "<input type='hidden' id='action' name='action' value='new_row' />\n";
- echo "<input type='hidden' id='table' name='table' value='".$in_which_table."' />\n";
+ htmlout("<form action='".$GLOBALS["scriptname"]."' method=post>");
+ htmlout("<input type='hidden' id='action' name='action' value='new_row' />");
+ htmlout("<input type='hidden' id='table' name='table' value='".$in_which_table."' />");
 
- echo "<table class='non-editable-table'>\n";
- echo "<caption class='form-top'>".$table_metadata["new-form-title"]."</caption>\n";
+ htmlout("<table class='non-editable-table'>");
+ htmlout("<caption class='form-top'>".$table_metadata["new-form-title"]."</caption>");
 
  $something_wrong=false;
  #
@@ -1647,9 +1808,9 @@ function output_new_form($in_which_table,$in_rows_count,$in_ini) {
   
   # Start row by emitting label (if "dont-show" flag is not set)
   if (!isset($attrs["dont-show"])) { 
-   echo "<tr>\n";
-   echo "<td ".$apply_header."><label for='".$id."'>".$attrs["form-label"]."</label></td>\n"; 
-   echo $apply_between;
+   htmlout("<tr>");
+   htmlout("<td ".$apply_header."><label for='".$id."'>".$attrs["form-label"]."</label></td>"); 
+   htmlout($apply_between);
    }
   #
   # Emit input element based on injourney attribute of column.
@@ -1664,7 +1825,7 @@ function output_new_form($in_which_table,$in_rows_count,$in_ini) {
     if(isset($attrs["default-value-from-ini"])) {
      $tmp="value='".$in_ini["defaults"][$attrs["default-value-from-ini"]]."'";
      }
-    echo "<td ".$apply_body."><input style='width: 98%;".$validators[$col]." ".$hook1." type='text' id='".$id."' name='".$id."' ".$tmp."/></td>\n";
+    htmlout("<td ".$apply_body."><input style='width: 98%;".$validators[$col]." ".$hook1." type='text' id='".$id."' name='".$id."' ".$tmp."/></td>");
     break;
     }
    case "list": {
@@ -1709,28 +1870,28 @@ function output_new_form($in_which_table,$in_rows_count,$in_ini) {
     # hidden input element.  This is desired if the column is a pointer to a
     # single-row-only table.
     if (isset($attrs["dont-show"])) {
-     echo "<input type='hidden' name='".$id."' id='".$id."' value='".$list_data["targets"][0]."' />\n";
+     htmlout("<input type='hidden' name='".$id."' id='".$id."' value='".$list_data["targets"][0]."' />");
      }
     # Otherwise emit input element.
     if (!isset($attrs["dont-show"]) and count($list_data["targets"])==0) {
      $something_wrong=true;
-     echo "<td ".$apply_body."><p>None available.</p></td>";
+     htmlout("<td ".$apply_body."><p>None available.</p></td>");
      }
     if (!isset($attrs["dont-show"]) and count($list_data["targets"])!=0) {
-     echo "<td ".$apply_body."><select style='width: 100%;' ".$hook1." name='".$id."' id='".$id."'>";
-     echo "<option value='' disabled selected hidden>(select one)</option>";
+     htmlout("<td ".$apply_body."><select style='width: 100%;' ".$hook1." name='".$id."' id='".$id."'>");
+     htmlout("<option value='' disabled selected hidden>(select one)</option>");
      $n=0;
      foreach ($list_data["targets"] as $list_datum) {
-      echo "<option value='".$list_datum."'>".$list_data["display_names"][$n]."</option>";
+      htmlout("<option value='".$list_datum."'>".$list_data["display_names"][$n]."</option>");
       $n++;
       }
-     echo "</select></td>\n";
+     htmlout("</select></td>");
      }
     break;
     }
    }
    # End row (if "dont-show" flag is clear)
-   if (!isset($attrs["dont-show"])) { echo "</tr>\n"; }
+   if (!isset($attrs["dont-show"])) { htmlout("</tr>"); }
   }
  #
  # Finish out form.
@@ -1740,13 +1901,13 @@ function output_new_form($in_which_table,$in_rows_count,$in_ini) {
   $noun=" ".$table_metadata["friendly-object-name"];
   }
  if(!$something_wrong) {
-  echo "<tr><td colspan=2 class='rowmethod-container'><button class='rowmethod-button'>Create new".$noun."</button></td></tr>\n";
+  htmlout("<tr><td colspan=2 class='rowmethod-container'><button class='rowmethod-button'>Create new".$noun."</button></td></tr>");
   }else{
-  echo "<tr><td colspan=2 class='rowmethod-container'>A new ".$noun." can't be created; see above.</td></tr>\n";
+  htmlout("<tr><td colspan=2 class='rowmethod-container'>A new ".$noun." can't be created; see above.</td></tr>");
   }
- echo "</table>\n";
- echo "</form>\n";
- echo "</div>\n";
+ htmlout("</table>");
+ htmlout("</form>");
+ htmlout("</div>");
  }
 
 
@@ -1824,12 +1985,17 @@ function new_form_defaults_from_table($in_which_table,
 
 
 function make_presentable($in_data,$in_type) {
+ $out_data="";
  switch ($in_type) {
   case "pid":
-   $out_data="<span class='presenting-pid'>PID ".$in_data."</span>";
+   if($GLOBALS["output_format"]==="html") { $out_data="<span class='presenting-pid'>"; }
+   $out_data.="PID ".$in_data;
+   if($GLOBALS["output_format"]==="html") { $out_data.="</span>"; }
    break;
   case "uuid":
-   $out_data="<span class='presenting-uuid'>UUID ".$in_data."</span>";
+   if($GLOBALS["output_format"]==="html") { $out_data="<span class='presenting-uuid'>"; }
+   $out_data.="UUID ".$in_data;
+   if($GLOBALS["output_format"]==="html") { $out_data.="</span>"; }
    break;
   case "date":
    if($in_data==="") { 
@@ -2543,6 +2709,7 @@ function log_entry($in_source,$in_eventdesc,$in_eventbody,$offer_event_view=fals
 # anythimg in the trashcan that has a button on the log is removed as well.
 #
 # Returns true if no database error occured, false if one did.
+ mtrace("log_entry(source:$in_source, eventdesc:$in_eventdesc, eventbody:$in_eventbody, offer_event_view:$offer_event_view, button_type:$button_type, button_type_target:$button_type_target)");
 
  # We can't do anything if database isn't open.
  if(!isset($GLOBALS["dbo"])){ return false; }
@@ -2565,7 +2732,9 @@ function log_entry($in_source,$in_eventdesc,$in_eventbody,$offer_event_view=fals
   # ... oldest log line will fall off.
 
   # Before we kick it out, we have to read it ...
-  $statement=$GLOBALS["dbo"]->prepare("SELECT * FROM log WHERE rowid = (SELECT MIN(rowid) FROM LOG)");
+  $sql="SELECT * FROM log WHERE rowid = (SELECT MIN(rowid) FROM LOG)";
+   mtrace("sql: \"$sql\"");
+  $statement=$GLOBALS["dbo"]->prepare($sql);
   $results=$statement->execute();
   if(any_db_error()){ return false; }
   $row=$results->fetchArray(SQLITE3_ASSOC); # TODO: test >1 row
@@ -2580,7 +2749,9 @@ function log_entry($in_source,$in_eventdesc,$in_eventbody,$offer_event_view=fals
     }
    } 
   # Now remove the oldest log entry row.
-  $statement=$GLOBALS["dbo"]->prepare("DELETE FROM log WHERE rowid = (SELECT MIN(rowid) FROM LOG)");
+  $sql="DELETE FROM log WHERE rowid = (SELECT MIN(rowid) FROM LOG)";
+   mtrace("sql: \"$sql\"");
+  $statement=$GLOBALS["dbo"]->prepare($sql);
   $results=$statement->execute();
   if(any_db_error()){ return false; }
   }
@@ -2597,6 +2768,8 @@ function log_entry($in_source,$in_eventdesc,$in_eventbody,$offer_event_view=fals
 
 
 function check_unique($in_which_table,$in_array_in_data) {
+ mtrace("DB op: check_unique(table:$in_which_table, array_in_data:array)");
+
  $tblattrs=schema_rowattr($in_which_table."/FOR_THIS_APP");
  if(!isset($tblattrs["friendly-object-name"])) {
   $friendly_object_name="item here";
@@ -2627,6 +2800,7 @@ function make_backrefs_for_new_row($in_which_table,$in_array_in_data) {
 # following attributes: 
 # - "allow-delete-by"
 # - "backref-by"
+ mtrace("DB op: make_backrefs_for_new_row(table:$in_which_table, array_in_data:array)");
 
  $tblattrs=schema_rowattr($in_which_table."/FOR_THIS_APP");
  foreach($GLOBALS["schemadef"] as $tblcolname=>$colattrs) {
@@ -2652,30 +2826,43 @@ function make_backrefs_for_new_row($in_which_table,$in_array_in_data) {
 
 function delete_backref($in_pointing_table,$in_keyed_col_name,$in_keyed_col_value) {
 # Deletes a backref specified by a column.
+ mtrace("DB op: delete_backref(pointing_table:$in_pointing_table, keyed_col_name:$in_keyed_col_name, keyed_col_value:$in_keyed_col_value)");
 
  if(!isset($GLOBALS["dbo"])){ return false; } # bounce if db not open
- $statement=$GLOBALS["dbo"]->prepare("DELETE FROM backref WHERE from_table = :in_pointing_table AND from_key_col_name = :in_keyed_col_name AND from_key_col_value = :in_keyed_col_value");
+ $sql="DELETE FROM backref WHERE from_table = :in_pointing_table AND from_key_col_name = :in_keyed_col_name AND from_key_col_value = :in_keyed_col_value";
+  mtrace("sql: \"$sql\"");
+ $statement=$GLOBALS["dbo"]->prepare($sql);
  $statement->bindValue(":in_pointing_table",$in_pointing_table,SQLITE3_TEXT);
+  mtrace("parameters: :in_pointing_table=$in_pointing_table");
  $statement->bindValue(":in_keyed_col_name",$in_keyed_col_name,SQLITE3_TEXT);
+  mtrace("parameters: :in_keyed_col_name=$in_keyed_col_name");
  $statement->bindValue(":in_keyed_col_value",$in_keyed_col_value,SQLITE3_TEXT);
+  mtrace("parameters: :in_keyed_col_value=$in_keyed_col_value");
  $results=$statement->execute();
  }
 
 
 function being_pointed_to($in_pointed_table,$in_keyed_col_name,$in_keyed_col_value) {
 # Checks the database to find out if a backref exists.
+ mtrace("DB op: being_pointed_to(pointed_table:$in_pointed_table, keyed_col_name:$in_keyed_col_name, keyed_col_value:$in_keyed_col_value)");
 
  if(!isset($GLOBALS["dbo"])){ return false; } # bounce if db not open
- $statement=$GLOBALS["dbo"]->prepare("SELECT * FROM backref WHERE to_table = :in_pointed_table AND to_key_col_name = :in_keyed_col_name AND to_key_col_value = :in_keyed_col_value");
+ $sql="SELECT * FROM backref WHERE to_table = :in_pointed_table AND to_key_col_name = :in_keyed_col_name AND to_key_col_value = :in_keyed_col_value";
+  mtrace("sql: \"$sql\"");
+ $statement=$GLOBALS["dbo"]->prepare($sql);
  $statement->bindValue(":in_pointed_table",$in_pointed_table);
+  mtrace("parameters: :in_pointed_table=$in_pointed_table");
  $statement->bindValue(":in_keyed_col_name",$in_keyed_col_name);
+  mtrace("parameters: :in_keyed_col_name=$in_keyed_col_name");
  $statement->bindValue(":in_keyed_col_value",$in_keyed_col_value);
+  mtrace("parameters: :in_keyed_col_value=$in_keyed_col_value");
  $results=$statement->execute();
  $row=$results->fetchArray();
  # all we are interested in is if we found something or not.
  if(is_bool($row)) {
-  if(!($row)) { return false; }
+  if(!($row)) { mtrace("returning false"); return false; }
   }
+  mtrace("returning true");
  return true;
  }
 
@@ -2688,6 +2875,8 @@ function read_table_all_rows_keyed_cols (
 # Actually, two columns - a "target" (key to identify something modifiable)
 # and a display name (contains user-presentable name of the target).
 # Indirectly uses $GLOBALS["schemadef"] via columns_from_schemadef()
+ mtrace("DB op: read_table_all_rows_keyed_cols(table:$in_which_table, which_col_target_name:$in_which_col_target_name, which_col_display_name:$in_which_col_display_name)");
+
  $out_columns_t=Array();
  $out_columns_d=Array();
  # bounce if dbo wasn't created (database never opened)
@@ -2699,7 +2888,9 @@ function read_table_all_rows_keyed_cols (
  # otherwise lets make a query
  $expected_cols=Array();
  $expected_cols=columns_from_schemadef($in_which_table);
- $statement=$GLOBALS["dbo"]->prepare("SELECT ".$in_which_col_target_name.",".$in_which_col_display_name." FROM ".$in_which_table);
+ $sql="SELECT ".$in_which_col_target_name.",".$in_which_col_display_name." FROM ".$in_which_table;
+  mtrace("sql: \"$sql\"");
+ $statement=$GLOBALS["dbo"]->prepare($sql);
  $results=$statement->execute();
  while($row=$results->fetchArray()) {
   $out_columns_t[]=$row[$in_which_col_target_name];
@@ -2715,6 +2906,7 @@ function read_table_all_rows_keyed_cols (
   $out_columns_d[]=$assembled;
   }
  $out_columns=Array("targets"=>$out_columns_t,"display_names"=>$out_columns_d);
+  mtrace("returning associative array with ".count($out_columns)." key(s)");
  return $out_columns;
  }
 
@@ -2726,6 +2918,8 @@ function read_table_all_rows_keyed_cols_minus_existing (
  # Actually, two columns - a "target" (key to identify something modifiable)
  # and a display name (contains user-presentable name of the target).
  # Indirectly uses $GLOBALS["schemadef"] via columns_from_schemadef()
+  mtrace("DB op: read_table_all_rows_keyed_cols_minus_existing(table:$in_which_table, which_col_target_name:$in_which_col_target_name, which_col_display_name:$in_which_col_display_name, existing:Array");
+
  $out_columns_t=Array();
  $out_columns_d=Array();
  # bounce if dbo wasn't created (database never opened)
@@ -2737,7 +2931,9 @@ function read_table_all_rows_keyed_cols_minus_existing (
  # otherwise lets make a query
  $expected_cols=Array();
  $expected_cols=columns_from_schemadef($in_which_table);
- $statement=$GLOBALS["dbo"]->prepare("SELECT ".$in_which_col_target_name.",".$in_which_col_display_name." FROM ".$in_which_table);
+ $sql="SELECT ".$in_which_col_target_name.",".$in_which_col_display_name." FROM ".$in_which_table;
+  mtrace("sql: \"$sql\"");
+ $statement=$GLOBALS["dbo"]->prepare($sql);
  $results=$statement->execute();
  while($row=$results->fetchArray()) {
   if(in_array($row[$in_which_col_target_name],$in_existing)) { continue; }
@@ -2754,6 +2950,7 @@ function read_table_all_rows_keyed_cols_minus_existing (
   $out_columns_d[]=$assembled;
   }
  $out_columns=Array("targets"=>$out_columns_t,"display_names"=>$out_columns_d);
+  mtrace("returning associative array with ".count($out_columns)." key(s)");
  return $out_columns;
  }
 
@@ -2766,7 +2963,8 @@ function delete_row($in_which_table, $in_target) {
  # TODO: Report database errors in $GLOBALS["outmsgs"]["errors"]
  #
  # Uses $GLOBALS["dbo"], $GLOBALS["schemadef"], $GLOBALS["outmsgs"]
- #
+  mtrace("DB op: delete_row(table:$in_which_table, target:$in_target)");
+
  $table_metadata=schema_rowattr($in_which_table."/FOR_THIS_APP");
  if(!(isset($table_metadata["allow-delete-by"]))) {
   merr("'".$in_which_table."' doesn't allow rows to be deleted.","hack");
@@ -2793,8 +2991,11 @@ function delete_row($in_which_table, $in_target) {
    }
   }
  
- $statement=$GLOBALS["dbo"]->prepare("DELETE FROM ".$in_which_table." WHERE ".$allow_delete_columnname." = :in_target");
+ $sql="DELETE FROM ".$in_which_table." WHERE ".$allow_delete_columnname." = :in_target";
+  mtrace("sql: \"$sql\"");
+ $statement=$GLOBALS["dbo"]->prepare($sql);
  $statement->bindValue(":in_target",$in_target,SQLITE3_TEXT);
+  mtrace("parameters: in_target=\"$in_target\"");
  $results=$statement->execute();
  }
 
@@ -2829,6 +3030,7 @@ function open_database_2($in_filename) {
  # Open 2nd handle to database, read only.
  # This won't create any tables.  This function shouldn't be called unless
  # open_database() was called first anyway.
+  mtrace("DB op: open_database_2($in_filename)");
 
  $GLOBALS["dbo2"]=new SQLite3($in_filename,SQLITE3_OPEN_READONLY);
  }
@@ -2840,16 +3042,21 @@ function read_row_expecting_just_one(&$receiving, $in_which_table, $in_select_co
 # Gets all columns of one row in a table.
 # Row selected by $in_select_col and $in_select_colvalue.
 # Issues an error if query does not return exactly one row.
+ mtrace("DB op: read_row_expecting_just_one(ref:receiving, table:$in_which_table, select_col:$in_select_col, select_colvalue:$in_select_colvalue)");
 
  # bounce if dbo wasn't created (database never opened)
  $out_row=Array();
  $out_row=read_table_filtered_rows($in_which_table, $in_select_col, $in_select_colvalue);
  if(count($out_row)>1) {
   merr("Multiple rows in ".tblnam($in_target_table)." have the value '".$in_select_colvalue."' in ".colname($in_select_col),"bad_db");
-  $receiving=Array(); return false;
+  $receiving=Array(); 
+   mtrace("returning false (not exactly 1 row)");
+  return false;
   }
  if(!isset($out_row[0])) { $receiving=""; return false; }
- $receiving=$out_row[0]; return true;
+ $receiving=$out_row[0];
+  mtrace("returning true, setting receiving reference to the found row"); 
+ return true;
  }
 
 
@@ -2857,6 +3064,7 @@ function read_table_all_rows($in_which_table) {
 # Does not consult schema.
 # Assumes $in_which_table exists in database.
 # Gets all columns of all rows of a table.
+ mtrace("DB op: read_table_all_rows(table:$in_which_table)");
 
  # bounce if dbo wasn't created (database never opened)
  $out_rows=Array();
@@ -2864,24 +3072,28 @@ function read_table_all_rows($in_which_table) {
   merr("read_table_all_rows('".$in_which_table."') was called and is_dbo_created returned false","bug");
   return $out_rows;
   }
- $statement=$GLOBALS["dbo"]->prepare("SELECT * FROM ".$in_which_table);
+ $sql="SELECT * FROM ".$in_which_table;
+  mtrace("sql: \"$sql\"");
+ $statement=$GLOBALS["dbo"]->prepare($sql);
  $results=$statement->execute();
  while($row=$results->fetchArray(SQLITE3_ASSOC)) {
   $out_rows[]=$row;
   }
+  mtrace("returning ".count($out_rows)." row(s)");
  return $out_rows;
  }
 
 
-function read_table_all_rows_multiple_cols($in_which_table,$in_array_which_cols) {
+function read_table_all_rows_multiple_cols($in_which_table, $in_array_which_cols) {
 # Does not consult schema.
 # Assumes $in_which_table exists in database.
 # Gets desired columns of all rows in a table.
+ mtrace("DB op: read_table_all_rows_multiple_cols(table:$in_which_table, array_which_cols:array)");
 
  # bounce if dbo wasn't created (database never opened)
  $out_rows=Array();
  if(!(is_dbo_created())){
-  merr("read_specific_rows_from_table('".$in_which_table.",".$in_array_which_rows.") was called and is_dbo_created returned false","bug");
+  merr("read_table_all_rows_multiple_cols('".$in_which_table.",".$in_array_which_rows.") was called and is_dbo_created returned false","bug");
   return $out_row;
   }
  $cscols="";
@@ -2889,11 +3101,14 @@ function read_table_all_rows_multiple_cols($in_which_table,$in_array_which_cols)
   if ($cscols!="") { $cscols.=","; }
   $cscols.=$col;
   }
- $statement=$GLOBALS["dbo"]->prepare("SELECT ".$cscols." FROM ".$in_which_table);
+ $sql="SELECT ".$cscols." FROM ".$in_which_table;
+  mtrace("sql: \"$sql\"");
+ $statement=$GLOBALS["dbo"]->prepare($sql);
  $results=$statement->execute();
  while($row=$results->fetchArray(SQLITE3_ASSOC)) {
   $out_rows[]=$row;
   }
+  mtrace("returning ".count($out_rows)." row(s)");
  return $out_rows;
  }
 
@@ -2905,6 +3120,7 @@ function does_value_exist_in_col(
 # Assumes $in_which_table exists in database.
 # Checks if anything exists in a table's column identified by a target-name
 # column pair.
+ mtrace("DB op: does_value_exist_in_col(table:$in_which_table, which_col_target_name:$in_which_col_target_name, which_col_display_name:$in_which_col_display_name, value:$in_value)");
 
  # bounce if dbo wasn't created (database never opened)
  if(!(is_dbo_created())){
@@ -2912,14 +3128,18 @@ function does_value_exist_in_col(
   return false;
   }
  # perform database lookup
- $statement=$GLOBALS["dbo"]->prepare("SELECT ".$in_which_col_target_name.",".$in_which_col_display_name." FROM ".$in_which_table." WHERE ".$in_which_col_target_name." = :x");
+ $sql="SELECT ".$in_which_col_target_name.",".$in_which_col_display_name." FROM ".$in_which_table." WHERE ".$in_which_col_target_name." = :x";
+  mtrace("sql: \"$sql\"");
+ $statement=$GLOBALS["dbo"]->prepare($sql);
  $statement->bindValue(":x",$in_value);
+  mtrace("parameters: x=\"$in_target\"");
  $results=$statement->execute();
  $row=$results->fetchArray();
  # all we are interested in is if we found something or not.
  if(is_bool($row)) {
-  if(!($row)) { return false; }
+  if(!($row)) { mtrace("returning false"); return false; }
   }
+  mtrace("returning true");
  return true;
  } 
 
@@ -2928,19 +3148,28 @@ function read_table_one_row_keyed_cols (
 # NOT SURE IF NEEDED
  $in_which_table, $in_wanted_col, $in_which_keyed_col_name, $in_which_keyed_col_value,
  ) { 
+ mtrace("DB op: read_table_one_row_keyed_cols(table:$in_which_table, wanted_col:$in_wanted_col, which_keyed_col_name:$in_which_keyed_col_name which_keyed_col_value:$in_which_keyed_col_value)");
+
  $expected_cols=columns_from_schemadef($in_which_table);
- $statement=$GLOBALS["dbo"]->prepare("SELECT ".$in_wanted_col." FROM ".$in_which_table." WHERE ".$in_which_keyed_col_name." = :in_which_keyed_col_value");
+ $sql="SELECT ".$in_wanted_col." FROM ".$in_which_table." WHERE ".$in_which_keyed_col_name." = :in_which_keyed_col_value";
+  mtrace("sql: \"$sql\"");
+ $statement=$GLOBALS["dbo"]->prepare($sql);
  $statement->bindValue(":in_which_keyed_col_value",$in_which_keyed_col_value);
+  mtrace("parameters: in_which_keyed_col_value=\"$in_which_keyed_col_value\"");
  $results=$statement->execute();
  $row=$results->fetchArray();
+  mtrace("returning \"$row[0]\"");
  return $row[0];
  }
 
 
-function update_row($in_which_table, $in_array_data, $in_key_column, $in_key_value) {
+function update_row(
+ $in_which_table, $in_array_data, $in_key_column, $in_key_value
+ ) {
 # Does not consult schema.
 # Assumes $in_which_table exists in database.
 # Updates a row identified by value $in_key_value in column $in_key_column.
+ mtrace("DB op: update_row(table:$in_which_table, data:array, key:$in_key_column, value:$in_key_value)");
 
  $dbo_execute_params_array=Array();
  $where_text="";
@@ -2952,17 +3181,21 @@ function update_row($in_which_table, $in_array_data, $in_key_column, $in_key_val
   }
  $where_text.=$in_key_column." = :x";
  $dbo_execute_params_array[":x"]=$in_key_value;
- $statement=$GLOBALS["dbo"]->prepare("UPDATE ".$in_which_table." SET ".$set_text." WHERE ".$where_text);
+ $sql="UPDATE ".$in_which_table." SET ".$set_text." WHERE ".$where_text;
+  mtrace("sql: \"$sql\"");
+ $statement=$GLOBALS["dbo"]->prepare($sql);
  foreach($dbo_execute_params_array as $key=>$value) {
   $statement->bindValue($key,$value,SQLITE3_TEXT);
+  mtrace("parameters: $key=\"$value\"");
   }
  $results=$statement->execute();
  }
 
 
-function insert_row($in_which_table, $in_array_data, &$out_result=Array()) { 
+function insert_row($in_which_table, $in_array_data) { 
 # Does not consult schema.
 # Assumes $in_which_table exists in database.
+ mtrace("DB op: insert_row(table:$in_which_table, data:array)");
 
  $dbo_execute_params_array=Array();
  $insert_text="("; $values_text="(";
@@ -2970,7 +3203,7 @@ function insert_row($in_which_table, $in_array_data, &$out_result=Array()) {
  foreach($in_array_data as $key=>$value) {
   if($first_flag==true){
    $insert_text.=','; $values_text.=',';
-   }else{
+   } else {
    $first_flag=true;
    }
    $insert_text.=$key;
@@ -2979,14 +3212,16 @@ function insert_row($in_which_table, $in_array_data, &$out_result=Array()) {
   }
  $insert_text.=")"; $values_text.=")";
 
- $statement=$GLOBALS["dbo"]->prepare("INSERT INTO ".$in_which_table.$insert_text." VALUES".$values_text);
+ $sql="INSERT INTO ".$in_which_table.$insert_text." VALUES".$values_text;
+  mtrace("sql: \"$sql\"");
+ $statement=$GLOBALS["dbo"]->prepare($sql);
  foreach($dbo_execute_params_array as $key=>$value) {
   $statement->bindValue($key,$value,SQLITE3_TEXT);
+  mtrace("parameters: $key=\"$value\"");
   }
  $results=$statement->execute();
- if($GLOBALS["dbo"]->lastErrorCode()==0) { return true; }
- $out_result["errorcode"]=$GLOBALS["dbo"]->lastErrorCode;
- $out_result["errormsg"]=$GLOBALS["dbo"]->lastErrorMsg;
+ if($GLOBALS["dbo"]->lastErrorCode()==0) { mtrace("returning true (successful)"); return true; }
+  mtrace("returning false (unsuccessful)");
  return false;
  }
 
@@ -2997,12 +3232,17 @@ function read_table_filtered_rows(
 # Does not consult schema.
 # Assumes $in_which_table exists in database.
 # Reads row(s) from a table where provided target is found in provided column.
+ mtrace("DB op: read_table_filtered_rows(table:$in_which_table, col:$in_select_col, colvalue:$in_select_colvalue)");
 
  $out_rows=Array();
- $statement=$GLOBALS["dbo"]->prepare("SELECT * FROM ".$in_which_table." WHERE ".$in_select_col." = :x");
+ $sql="SELECT * FROM ".$in_which_table." WHERE ".$in_select_col." = :x";
+  mtrace("sql: \"$sql\"");
+ $statement=$GLOBALS["dbo"]->prepare($sql);
  $statement->bindValue(":x",$in_select_colvalue);
+  mtrace("parameters: in_select_colvalue=\"".$in_select_colvalue."\"");
  $results=$statement->execute();
  while($row=$results->fetchArray(SQLITE3_ASSOC)) { $out_rows[]=$row; }
+  mtrace("returning ".count($out_rows)." row(s)");
  return $out_rows;
  }
 
@@ -3011,7 +3251,7 @@ function delete_all_rows_bypass_schema($in_which_table) {
 # Does not consult schema.
 # Assumes $in_which_table exists in database.
 # Deletes all rows in table.
- mtrace("DB op: delete_all_rows_bypass_schema($in_which_table)");
+ mtrace("DB op: delete_all_rows_bypass_schema(table:$in_which_table)");
 
  $sql="DELETE FROM ".$in_which_table;
   mtrace("sql: \"$sql\"");
@@ -3031,7 +3271,7 @@ function delete_row_bypass_schema(
 # - Intended to be called by generators or row methods that need to manipulate
 #   the database as a side effect instead of in direct service to the incoming
 #   request.
- mtrace("DB op: delete_row_bypass_schema($in_which_table, $in_allow_delete, $in_target, $in_backref)");
+ mtrace("DB op: delete_row_bypass_schema(table:$in_which_table, allow_delete:$in_allow_delete, target:$in_target, backref:$in_backref)");
 
  if($in_backref) { 
   delete_backref($in_which_table,$in_allow_delete,$in_target);
@@ -3046,6 +3286,39 @@ function delete_row_bypass_schema(
  }
 
 
+# ----------------------------------------------------------------------------
+# [ Output buffer related ]
+# ----------------------------------------------------------------------------
+
+
+function textout($out_label,$out_string) {
+ if($out_string==="") { return; }
+ $GLOBALS["output_buffer"]["text"][$out_label][]=$out_string; 
+ }
+
+
+function htmloutp($out_string,$mode=0) {
+ static $current_line;
+ $current_line.=$out_string;
+ switch ($mode) {
+  case 0:
+   return;
+   break;
+  case 1:
+   htmlout($current_line);
+   $current_line="";
+   break;
+  }
+ }
+
+
+function htmlout($out_line) {
+ if($out_line==="") { return; }
+ $GLOBALS["output_buffer"]["html"][]=$out_line."\n";
+ }
+
+
+# ----------------------------------------------------------------------------
 # ----------------------------------------------------------------------------
 # [ Initialization-related ]
 # ----------------------------------------------------------------------------
@@ -3143,58 +3416,59 @@ function style_sheet() {
 # https://necolas.github.io/normalize.css/8.0.1/normalize.css
 # https://unpkg.com/concrete.css@2.1.1/concrete.css
 
- echo "<style>\n";
- echo "html{line-height:1.15;-webkit-text-size-adjust:100%}body{margin:0}main{display:block}h1{font-size:2em;margin:0.67em 0}hr{box-sizing:content-box;height:0;overflow:visible}pre{font-family:monospace, monospace;font-size:1em}a{background-color:transparent}abbr[title]{border-bottom:none;text-decoration:underline;text-decoration:underline dotted}b,strong{font-weight:bolder}code,kbd,samp{font-family:monospace, monospace;font-size:1em}small{font-size:80%}sub,sup{font-size:75%;line-height:0;position:relative;vertical-align:baseline}sub{bottom:-0.25em}sup{top:-0.5em}img{border-style:none}button,input,optgroup,select,textarea{font-family:inherit;font-size:100%;line-height:1.15;margin:0;}button,input{overflow:visible}button,select{text-transform:none}button,[type='button'],[type='reset'],[type='submit']{-webkit-appearance:button}button::-moz-focus-inner,[type='button']::-moz-focus-inner,[type='reset']::-moz-focus-inner,[type='submit']::-moz-focus-inner{border-style:none;padding:0}button:-moz-focusring,[type='button']:-moz-focusring,[type='reset']:-moz-focusring,[type='submit']:-moz-focusring{outline:1px dotted ButtonText}fieldset{padding:0.35em 0.75em 0.625em}legend{box-sizing:border-box;color:inherit;display:table;max-width:100%;padding:0;white-space:normal}progress{vertical-align:baseline}textarea{overflow:auto}[type='checkbox'],[type='radio']{box-sizing:border-box;padding:0}[type='number']::-webkit-inner-spin-button,[type='number']::-webkit-outer-spin-button{height:auto}[type='search']{-webkit-appearance:textfield;outline-offset:-2px}[type='search']::-webkit-search-decoration{-webkit-appearance:none}::-webkit-file-upload-button{-webkit-appearance:button;font:inherit}details{display:block}summary{display:list-item}template{display:none}[hidden]{display:none}\n";
+ htmlout("<style>");
+ htmlout("html{line-height:1.15;-webkit-text-size-adjust:100%}body{margin:0}main{display:block}h1{font-size:2em;margin:0.67em 0}hr{box-sizing:content-box;height:0;overflow:visible}pre{font-family:monospace, monospace;font-size:1em}a{background-color:transparent}abbr[title]{border-bottom:none;text-decoration:underline;text-decoration:underline dotted}b,strong{font-weight:bolder}code,kbd,samp{font-family:monospace, monospace;font-size:1em}small{font-size:80%}sub,sup{font-size:75%;line-height:0;position:relative;vertical-align:baseline}sub{bottom:-0.25em}sup{top:-0.5em}img{border-style:none}button,input,optgroup,select,textarea{font-family:inherit;font-size:100%;line-height:1.15;margin:0;}button,input{overflow:visible}button,select{text-transform:none}button,[type='button'],[type='reset'],[type='submit']{-webkit-appearance:button}button::-moz-focus-inner,[type='button']::-moz-focus-inner,[type='reset']::-moz-focus-inner,[type='submit']::-moz-focus-inner{border-style:none;padding:0}button:-moz-focusring,[type='button']:-moz-focusring,[type='reset']:-moz-focusring,[type='submit']:-moz-focusring{outline:1px dotted ButtonText}fieldset{padding:0.35em 0.75em 0.625em}legend{box-sizing:border-box;color:inherit;display:table;max-width:100%;padding:0;white-space:normal}progress{vertical-align:baseline}textarea{overflow:auto}[type='checkbox'],[type='radio']{box-sizing:border-box;padding:0}[type='number']::-webkit-inner-spin-button,[type='number']::-webkit-outer-spin-button{height:auto}[type='search']{-webkit-appearance:textfield;outline-offset:-2px}[type='search']::-webkit-search-decoration{-webkit-appearance:none}::-webkit-file-upload-button{-webkit-appearance:button;font:inherit}details{display:block}summary{display:list-item}template{display:none}[hidden]{display:none}");
+ htmlout("html * { font-family: Arial, Helvetica, sans-serif; font-size: 1.25rem; }");
+ htmlout("body { max-width: 700px; margin: 0 auto; }");
+ htmlout("table { width: 100%; table-layout: fixed; overflow-wrap: break-word; }");
+ htmlout(".tablinks-title { padding: 0px; margin: 0px; text-align: center; background-color: blue; color: white; }");
 
- echo "html * { font-family: Arial, Helvetica, sans-serif; font-size: 1.25rem; }\n";
- echo "body { max-width: 700px; margin: 0 auto; }\n";
- echo "table { width: 100%; table-layout: fixed; overflow-wrap: break-word; }\n";
- echo ".tablinks-title { padding: 0px; margin: 0px; text-align: center; background-color: blue; color: white; }\n";
+ htmlout("tr.toplink-box-row { line-height: 0.8rem; }");
+ htmlout("td.toplink-box { padding: 4px; 4px; 4px; 4px; border-style: solid; border-color: black; border-width: 1px; text-align: center; width: auto; }");
+ htmlout("a.toplink { font-size: 1rem; font-weight: bold; font-variant-caps: small-caps; }");
+ htmlout(".toplink-selected { background-color: white; }");
+ htmlout(".toplink-not-selected { background-color: lightgrey; }");
+ htmlout(".tablinks { background-color: lightgrey; border: solid; border-width: 1px; margin: 2px 2px 2px 2px; width: 40%; }");
+ htmlout(".tablinks:active { color: white; }");
+ htmlout(".tablinks.active { background-color: white; }");
+ htmlout(".logbutton-container { padding: 1px; margin: 1px; text-align: right; background-color: blue; color: darkgrey; }");
 
- echo "tr.toplink-box-row { line-height: 0.8rem; }\n";
- echo "td.toplink-box { padding: 4px; 4px; 4px; 4px; border-style: solid; border-color: black; border-width: 1px; text-align: center; width: auto; }\n";
- echo "a.toplink { font-size: 1rem; font-weight: bold; font-variant-caps: small-caps; }\n";
- echo ".toplink-selected { background-color: white; }\n";
- echo ".toplink-not-selected { background-color: lightgrey; }\n";
- echo ".tablinks { background-color: lightgrey; border: solid; border-width: 1px; margin: 2px 2px 2px 2px; width: 40%; }\n";
- echo ".tablinks:active { color: white; }\n";
- echo ".tablinks.active { background-color: white; }\n";
- echo ".logbutton-container { padding: 1px; margin: 1px; text-align: right; background-color: blue; color: darkgrey; }\n";
+ htmlout(".logbutton { font-size: 1rem; background-color: lightgrey; border: solid; border-width: 1px; margin: 2px 2px 2px 2px; }");
+ htmlout(".logbutton:active { color: white; }");
 
- echo ".logbutton { font-size: 1rem; background-color: lightgrey; border: solid; border-width: 1px; margin: 2px 2px 2px 2px; }\n";
- echo ".logbutton:active { color: white; }\n";
+ htmlout(".rowmethod-container { padding: 1px; margin: 1px; text-align: right; background-color: blue; color: darkgrey; }");
+ htmlout(".rowmethod-button { background-color: lightgrey; border: solid; border-width: 1px; margin: 2px 2px 2px 2px; }");
+ htmlout(".rowmethod-button:active { color: white; }");
+ htmlout(".stdout { font-family: monospace; font-size: 0.9rem; width: 100%; }");
+ htmlout(".stdout-top { font-style: italic; margin: 0px 0px 0px 0px; padding: 16px 0px 0px 0px; }");
+ htmlout(".tt { font-family: monospace; }");
+ htmlout(".form-column-header          { font-size: 1rem; width: 30%; padding: 0px 0px 0px 0px; vertical-align: middle; background-color: #c0c0c0; border: 1px solid #ffffff; }");
+ htmlout(".form-column-header-full     { font-size: 1rem; width: 100%; padding: 0px 0px 0px 0px; vertical-align: middle; background-color: #c0c0c0; border: 1px solid #ffffff; }");
+ htmlout(".form-column-data            { font-size: 1rem; padding: 0px; vertical-align: middle; }");
+ htmlout(".form-column-data-full       { font-size: 1rem; width: 100%; padding: 0px; vertical-align: middle; }");
 
- echo ".rowmethod-container { padding: 1px; margin: 1px; text-align: right; background-color: blue; color: darkgrey; }\n";
- echo ".rowmethod-button { background-color: lightgrey; border: solid; border-width: 1px; margin: 2px 2px 2px 2px; }\n";
- echo ".rowmethod-button:active { color: white; }\n";
- echo ".stdout { font-family: monospace; font-size: 0.9rem; width: 100%; }\n";
- echo ".stdout-top { font-style: italic; margin: 0px 0px 0px 0px; padding: 16px 0px 0px 0px; }\n";
- echo ".tt { font-family: monospace; }\n";
- echo ".form-column-header          { font-size: 1rem; width: 30%; padding: 0px 0px 0px 0px; vertical-align: middle; background-color: #c0c0c0; border: 1px solid #ffffff; }\n";
- echo ".form-column-header-full     { font-size: 1rem; width: 100%; padding: 0px 0px 0px 0px; vertical-align: middle; background-color: #c0c0c0; border: 1px solid #ffffff; }\n";
- echo ".form-column-data            { font-size: 1rem; padding: 0px; vertical-align: middle; }\n";
- echo ".form-column-data-full       { font-size: 1rem; width: 100%; padding: 0px; vertical-align: middle; }\n";
+ htmlout(".form-column-header-new      { font-size: 1rem; width: 30%; padding: 0px 0px 0px 0px; vertical-align: middle; background-color: #c0c0c0; border: 1px solid #ffffff; }");
+ htmlout(".form-column-header-new-full { font-size: 1rem; width: 100%; padding: 0px 0px 0px 0px; vertical-align: middle; background-color: #c0c0c0; border: 1px solid #ffffff; }");
+ htmlout("label { font-size: 1rem; }");
+ htmlout(".form-column-data-new        { font-size: 1rem; padding: 0px 0px 0px 0px; vertical-align: middle; }");
+ htmlout(".form-column-data-new-full   { font-size: 1rem; padding: 0px 0px 0px 0px; vertical-align: middle; }");
+ htmlout(".non-editable-table { padding: 2px; border-style: solid; border-width: 1px; border-color: black; word-break: break-word; }");
+ htmlout("caption.non-editable-table-caption { background-color: #c0c0c0; }");
+ htmlout("caption.form-top { text-align: left; font-style: italic; padding: 16px 0px 0px 0px; }");
+ htmlout(".return-link { text-align: right; }");
+ htmlout(".presenting-pid { border-style: solid; border-width: 1px; padding-left: 5px; padding-right: 5px; font-size: 0.8rem; font-family: monospace; }");
+ htmlout(".presenting-uuid { border-style: solid; border-width: 1px; padding-left: 5px; padding-right: 5px; font-size: 0.8rem; font-family: monospace; }");
+ htmlout(".no-data { color: #c0c0c0; }");
+ htmlout(".action-history-date { text-align: right; padding: 0px 0px 1px 0px; margin: 0px; font-size: 12px; background-color: #c0c0c0; }");
+ htmlout(".action-history-event { padding: 1px; margin: 0px; font-size: 12px; }");
+ htmlout(".action-history-container { background-color: white; padding: 0px; margin: 0px; word-break: break-word; }");
 
- echo ".form-column-header-new      { font-size: 1rem; width: 30%; padding: 0px 0px 0px 0px; vertical-align: middle; background-color: #c0c0c0; border: 1px solid #ffffff; }\n";
- echo ".form-column-header-new-full { font-size: 1rem; width: 100%; padding: 0px 0px 0px 0px; vertical-align: middle; background-color: #c0c0c0; border: 1px solid #ffffff; }\n";
- echo "label { font-size: 1rem; }\n";
- echo ".form-column-data-new        { font-size: 1rem; padding: 0px 0px 0px 0px; vertical-align: middle; }\n";
- echo ".form-column-data-new-full   { font-size: 1rem; padding: 0px 0px 0px 0px; vertical-align: middle; }\n";
- echo ".non-editable-table { padding: 2px; border-style: solid; border-width: 1px; border-color: black; word-break: break-word; }\n";
- echo "caption.non-editable-table-caption { background-color: #c0c0c0; }\n";
- echo "caption.form-top { text-align: left; font-style: italic; padding: 16px 0px 0px 0px; }\n";
- echo ".return-link { text-align: right; }\n";
- echo ".presenting-pid { border-style: solid; border-width: 1px; padding-left: 5px; padding-right: 5px; font-size: 0.8rem; font-family: monospace; }\n";
- echo ".presenting-uuid { border-style: solid; border-width: 1px; padding-left: 5px; padding-right: 5px; font-size: 0.8rem; font-family: monospace; }\n";
- echo ".no-data { color: #c0c0c0; }\n";
- echo ".action-history-date { text-align: right; padding: 0px 0px 1px 0px; margin: 0px; font-size: 12px; background-color: #c0c0c0; }\n";
- echo ".action-history-event { padding: 1px; margin: 0px; font-size: 12px; }\n";
- echo ".action-history-container { background-color: white; padding: 0px; margin: 0px; word-break: break-word; }\n";
-
- echo "</style>\n";
+ htmlout("</style>");
  }
 
 function is_blacklisted($in_command) {
+ mtrace("is_blacklisted(command:$in_command)");
+
  # Allow processed before deny
  $allow_dirs_starting_with=Array("/etc/lsc/","/opt","/usr/bin","/usr/local/");
  $deny_dirs_specifically=Array("/");
@@ -3221,19 +3495,19 @@ function is_blacklisted($in_command) {
  $slash_mode=false;
  for($i=0;$i<strlen($dir);$i++) {
   if($slash_mode) {
-   if(($string[$i]===".") and ($string[$i-1]===".")) {
+   if(($dir[$i]===".") and ($dir[$i-1]===".")) {
     merr("Executable paths containing two dots '/../' are blacklisted.");
     $not_ok=true;
     break;
     }
-   if($string[$i]!==".") { $slash_mode=false; }
+   if($dir[$i]!==".") { $slash_mode=false; }
    } 
-  if($in_string[$i]==="$") {
+  if($dir[$i]==="$") {
    merr("Executable paths with dollar signs ('$') are blacklisted.");
    $not_ok=true;
    break;
    }
-  if($in_string[$i]==="/") {
+  if($dir[$i]==="/") {
    $slash_mode=true;
    }
   }
