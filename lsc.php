@@ -13,13 +13,13 @@ $my_name=$my_name_tmp[array_key_last($my_name_tmp)];
 $user=get_current_user(); $hostname=gethostname();
 
 set_globals($user,$hostname,$my_name);
-$GLOBALS["output_format"]="text";
 $GLOBALS["output_buffer"]["html"]=Array();
 $GLOBALS["output_buffer"]["text"]=Array();
 $GLOBALS["output_buffer"]["text"]["error"]=Array();
 $GLOBALS["output_buffer"]["text"]["notice"]=Array();
 $GLOBALS["output_buffer"]["text"]["data"]=Array();
 $GLOBALS["output_buffer"]["text"]["table"]=Array();
+$GLOBALS["output_buffer"]["text"]["table-row-colnames"]=Array();
 $GLOBALS["output_buffer"]["text"]["table-row"]=Array();
 $GLOBALS["output_trace_msgs"]=true;
 $GLOBALS["output_debug_msgs"]=true;
@@ -616,6 +616,10 @@ function VALIDATOR_defined_arguments ( $in_data ) {
 #   setting the action to 'uid-0-muzzle' if this happens to be running as
 #   root.
 $ACTION=validate_action(@$_POST["action"]);
+# Get and validate "format" query string from HTTP request.
+# - validate_output_format() will populate a default output format if
+#   needed--html--or set it to html if an unsupported format is requested.
+$GLOBALS["output_format"]=validate_output_format(@$_GET["format"]);
 
 # Safety: Only set $ini_file if not UID 0.
 # - If this app is mistakenly run as root, the .ini file isn't even touched,
@@ -808,6 +812,9 @@ if(isset($P["return_to"]) and $P["return_to"]!=="optional") {
   $return_link.="?table=".$P["table"];
   }
 }
+if($GLOBALS["output_format"]!=="html") {
+ $return_link.="&format=".$GLOBALS["output_format"];
+ }
 
 # Nothing beyond this point should be writing to the database.
 # Reading may still be possible.
@@ -875,6 +882,8 @@ htmlout("</script>\n");
 # Wrap it up.
 finish_output();
 
+# Up to this point, we have been buffering everything.
+# Time to spit it all out.
 switch ($GLOBALS["output_format"]) {
  case "text":
   foreach($GLOBALS["output_buffer"]["text"]["error"] as $text_line) {
@@ -890,6 +899,9 @@ switch ($GLOBALS["output_format"]) {
     }
    echo "-----------------------------------------------------------------------------\n";
    }
+  if(isset($GLOBALS["output_buffer"]["text"]["table-row-colnames"][0])) {
+   echo $GLOBALS["output_buffer"]["text"]["table-row-colnames"][0]."\n";
+   }
   if(isset($GLOBALS["output_buffer"]["text"]["table-row"])) {
    foreach($GLOBALS["output_buffer"]["text"]["table-row"] as $text_line) {
     echo $text_line."\n";
@@ -902,6 +914,8 @@ switch ($GLOBALS["output_format"]) {
    }
   break;
  }
+
+# All done.
 exit;
 
 # ----------------------------------------------------------------------------
@@ -1508,17 +1522,19 @@ function output_table_noneditable($in_which_table,$in_rows_array) {
 
  # Process results from query ...
  #
+
  # Loop through each row of the table ...
  foreach($in_rows_array as $row) {
   #
   # and loop through each column of the row.
+  $first_col_flag=true;
   foreach($cols as $col) {
    # Get column attributes from table schema.
    $attrs=$attrs_cols[$col];
    # Skip columns with "dont-show" specified.
-   if(isset($attrs["dont-show"])){ continue; }
+   if(isset($attrs["dont-show"])){ unset($headers[$col]); continue; }
    # Skip columns that just hold default values for other tables.
-   if(isset($attrs["provides-defaults"])){ continue; }
+   if(isset($attrs["provides-defaults"])){ unset($headers[$col]); continue; }
    #
    # If this is a confirmation key column then we actually want the user to 
    # provide it when executing a row method.  This means we generate an input
@@ -1568,8 +1584,12 @@ function output_table_noneditable($in_which_table,$in_rows_array) {
      }
 
    # Present the data to show from the row's column.
+   if($first_col_flag) {
+    $first_col_flag=false; 
+    } else {
+    output_table_noneditable_row_inbetween();
+    }
    output_table_noneditable_row($attrs,$headers[$col],@$data_to_show);
-
    }
 
   # Handle options column here.
@@ -1615,12 +1635,13 @@ function output_table_noneditable($in_which_table,$in_rows_array) {
  # Finish outputting table.
  if( !isset($table_metadata["single-row-only"])
   or !isset($table_metadata["single-row-only-empty-message"]) ) {
-  output_table_noneditable_row_end(count($in_rows_array)." object(s)");
+  output_table_noneditable_bottom(count($in_rows_array)." object(s)");
   }else{
    if(count($in_rows_array)==0){
-    output_table_noneditable_row_end($table_metadata["single-row-only-empty-message"]);
+    output_table_noneditable_bottom($table_metadata["single-row-only-empty-message"]);
     }
    }
+  output_table_noneditable_column_names($headers);
   output_table_noneditable_container_end();
  }
 
@@ -1646,8 +1667,8 @@ function output_table_noneditable_row($attrs=Array(),$header,$data="") {
  switch ($GLOBALS["output_format"]) {
   case "text":
    $text="";
-   if($data==="") { $text="No data"; } else { $text=$data; }
-   textout("table-row",$header.": ".$data);
+   if($data==="") { $text="NO_DATA"; } else { $text="\"".$data."\""; }
+   textoutp("table-row",$text);
    break; # /case "text":
   case "html":
    $html="";
@@ -1674,7 +1695,18 @@ function output_table_noneditable_row($attrs=Array(),$header,$data="") {
    break; # /case "html":
   } # /switch ($GLOBALS["output_format"]) 
  }
+function output_table_noneditable_row_inbetween() {
+ switch ($GLOBALS["output_format"]) {
+  case "text":
+   textoutp("table-row",",");
+   break;
+  }
+ }
 function output_table_noneditable_row_end() {
+ if($GLOBALS["output_format"]==="text") { 
+  textoutp("table-row","",2);
+  return;
+  }
  if($GLOBALS["output_format"]!=="html") { return; }
  htmlout("</tr>");
  htmlout("<tr><td colspan=2></td></tr>");
@@ -1687,6 +1719,21 @@ function output_table_noneditable_bottom($message) {
   case "html":
    htmlout("<td colspan=2 style='text-align: right'>".$message."</td>");
    break;
+  }
+ }
+function output_table_noneditable_column_names($in_array_column_names) {
+ switch ($GLOBALS["output_format"]) {
+  case "text":
+   $first=true;
+   foreach($in_array_column_names as $key=>$colname) {
+    if($first) {
+     $first=false;
+     } else {
+     textoutp("table-row-colnames",",");
+     }
+    textoutp("table-row-colnames","\"".$colname."\"");
+    }
+   textoutp("table-row-colnames","",2);
   }
  }
 function output_table_noneditable_container_end() {
@@ -2231,7 +2278,7 @@ function parse_out_injourney_info($in_attrs) {
 # [ HTTP query processing and validation functions ]
 # ----------------------------------------------------------------------------
 
-function validate_action($in_qsvar_action){
+function validate_action($in_qsvar_action) {
  # Normalize the incoming 'action' query string, making sure it has only 
  # valid characters and is a valid length (16 characters or less).
  # - Whitelisting of valid action values can be done here.
@@ -2251,12 +2298,22 @@ function validate_action($in_qsvar_action){
   mnotice("This application is currently in read-only mode.");
   }
  $out_action="show";
- if(isset($in_qsvar_action)){
-  $tmp=trim(strtolower($in_qsvar_action));
-  $tmp=substr($tmp,0,16);
+ if(isset($in_qsvar_action)) {
+  $tmp=trim(strtolower(substr($in_qsvar_action,0,16)));
   $out_action=$tmp;
   }
   return $out_action;
+ }
+
+
+function validate_output_format($in_qsvar_format) { 
+ if(isset($in_qsvar_format)) {
+  $tmp=trim(strtolower(substr($in_qsvar_format,0,16)));
+   if($tmp==="html") { return "html"; }
+   if($tmp==="text") { $out_format="text"; return "text"; }
+   mdebug("unsupported output format \".$in_qsvar_format.\" requested","hack");
+  }
+  return "html";
  }
 
 function generate_app_value(
@@ -3290,6 +3347,21 @@ function delete_row_bypass_schema(
 # [ Output buffer related ]
 # ----------------------------------------------------------------------------
 
+
+function textoutp($out_label,$out_string,$mode=0) {
+ static $current_line;
+ switch ($mode) { 
+  case 0:
+   $current_line.=$out_string;
+   break;
+  case 1:
+   $current_line.=$out_string;
+  case 2:
+   textout($out_label,$current_line);
+   $current_line="";
+   break;
+  }
+ }
 
 function textout($out_label,$out_string) {
  if($out_string==="") { return; }
