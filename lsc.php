@@ -2,27 +2,9 @@
 error_reporting(E_ALL);
 ini_set('display_errors','On');
 
-# Get script name; used to generate URL links.
-$my_name_tmp=explode('/',$_SERVER['SCRIPT_NAME']);
-$my_name=$my_name_tmp[array_key_last($my_name_tmp)];
-
-# Get the current user and hostname.
-# - Used in HTML output and possibly needed by generators.
-# - The username that the script is running as is also used in determining
-#   where to find the .INI file.
-$user=get_current_user(); $hostname=gethostname();
-
-set_globals($user,$hostname,$my_name);
-$GLOBALS["output_buffer"]["html"]=Array();
-$GLOBALS["output_buffer"]["text"]=Array();
-$GLOBALS["output_buffer"]["text"]["error"]=Array();
-$GLOBALS["output_buffer"]["text"]["notice"]=Array();
-$GLOBALS["output_buffer"]["text"]["data"]=Array();
-$GLOBALS["output_buffer"]["text"]["table"]=Array();
-$GLOBALS["output_buffer"]["text"]["table-row-colnames"]=Array();
-$GLOBALS["output_buffer"]["text"]["table-row"]=Array();
-$GLOBALS["output_trace_msgs"]=true;
-$GLOBALS["output_debug_msgs"]=true;
+# ----------------------------------------------------------------------------
+# lsc.php
+# ----------------------------------------------------------------------------
 
 # === MASTER SCHEMA DEFINITION
 # - Defines tables and columns.
@@ -30,118 +12,132 @@ $GLOBALS["output_debug_msgs"]=true;
 #   table.
 # - Data for validation and methods are included as well as data constraints.
 $GLOBALS["schemadef"]=Array(
- 'conf/FOR_THIS_APP'		=> 'title:Configuration'
-				   .'/new-form-title:			Configuration'
-				   .'/allow-delete-by:			uuid'
-				   .'/single-row-only'
-				   .'/single-row-only-empty-message:	No configuration currently defined'
-				   .'/friendly-object-name:		configuration'
-				   .'/instance-friendly-name-is:	uuid'
-				   .'/toplink:				configure'
-				   ,
- 'conf/uuid'			=> 'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
- 'conf/basefilepath'		=> 'req:y/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localdir/form-label:Base File Path/default-value-from-ini:homedir/present-width:full-width',
- 'conf/stdoutfilepath'		=> 'req:y/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localdir/form-label:stdout File Path/default-value-from-ini:stdoutdir/present-width:full-width',
+ 'conf/FOR_THIS_APP'	    	=>  'title:Configuration'
+		            	    	   .'/new-form-title:			    Configuration'
+		            	    	   .'/allow-delete-by:			    uuid'
+		            	    	   .'/single-row-only'
+		            	    	   .'/single-row-only-empty-message:No configuration currently defined'
+		            	    	   .'/friendly-object-name:		    configuration'
+			                 	   .'/instance-friendly-name-is:	uuid'
+			        	           .'/toplink:				        configure'
+			                	   ,
+ 'conf/uuid'		        	=>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
+ 'conf/basefilepath'	    	=>  'req:y/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localdir/form-label:Base File Path/default-value-from-ini:homedir/present-width:full-width',
+ 'conf/stdoutfilepath'	    	=>  'req:y/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localdir/form-label:stdout File Path/default-value-from-ini:stdoutdir/present-width:full-width',
  # ---------------------------------------------------------------------------
- 'rpmap/FOR_THIS_APP'		=> 'title:Locations (Port and Prefix)'
-				   .'/new-form-title:			Define A Port and Prefix Combination'
-				   .'/allow-delete-by:			uuid'
-				   .'/row-must-exist-in:		conf'
-				   .'/must-exist-in-fails-message:	You can&apos;t define a location until you create a configuration.'
-				   .'/friendly-object-name:		location'
-				   .'/instance-friendly-name-is:	number'
-				   .'/toplink:				locations'
-				   ,
- 'rpmap/pointer_to_conf'	=> 'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Under Configuration/dont-show'.
-				   '/is-pointer-to:conf/pointer-links-by:uuid/shown-by:basefilepath',
- 'rpmap/uuid'			=> 'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
- 'rpmap/number'			=> 'req:y/type:int/data:port/minval:1024/maxval:  65535/injourney:user-enters-text-for-number/form-label:TCP&#47;IP Port Number/must-be-unique',
- 'rpmap/urlprefix'		=> 'req:y/type:str/data:url /minlen:   1/maxlen:   1024/injourney:user-enters-text-for-urlprefix/form-label:URL Prefix',
+ 'rpmap/FOR_THIS_APP'	    	=>  'title:Locations (Port and Prefix)'
+			                  	   .'/new-form-title:			    Define A Port and Prefix Combination'
+		                		   .'/allow-delete-by:		    	uuid'
+		                		   .'/row-must-exist-in:	    	conf'
+	            	    		   .'/must-exist-in-fails-message:	You can&apos;t define a location until you create a configuration.'
+	            		    	   .'/friendly-object-name:		    location'
+	            		    	   .'/instance-friendly-name-is:	number'
+	            	    		   .'/toplink:				        locations'
+	            			       ,
+ 'rpmap/pointer_to_conf'	    =>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Under Configuration/dont-show'.
+				                    '/is-pointer-to:conf/pointer-links-by:uuid/shown-by:basefilepath',
+ 'rpmap/uuid'			        =>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
+ 'rpmap/number'		        	=>  'req:y/type:int/data:port/minval:1024/maxval:  65535/injourney:user-enters-text-for-number/form-label:TCP&#47;IP Port Number/must-be-unique',
+ 'rpmap/urlprefix'	         	=>  'req:y/type:str/data:url /minlen:   1/maxlen:   1024/injourney:user-enters-text-for-urlprefix/form-label:URL Prefix',
  # ---------------------------------------------------------------------------
- 'defined/FOR_THIS_APP'		=> 'title:Services'
-				   .'/new-form-title:			Define A Service'
-				   .'/allow-delete-by:			uuid'
-				   .'/row-must-exist-in:		conf'
-				   .'/must-exist-in-fails-message:	You can&apos;t create a service until you create a configuration.'
-				   .'/friendly-object-name:		service'
-				   .'/instance-friendly-name-is:	name'
-				   .'/toplink:				services'
-				   ,
- 'defined/pointer_to_conf'	=> 'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Under Configuration/dont-show'.
-				   '/is-pointer-to:conf/pointer-links-by:uuid/shown-by:basefilepath',
- 'defined/uuid'			=> 'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
- 'defined/name'			=> 'req:y/type:str/data:name/minlen:   1/maxlen:     50/injourney:user-enters-text/form-label:Service Name',
- 'defined/description'		=> 'req:n/type:str/data:name/minlen:   0/maxlen:   4000/injourney:user-enters-text/form-label:Service Description',
- 'defined/command'		=> 'req:y/type:str/data:cmd /minlen:   1/maxlen:    500/injourney:user-selects-from-ini-list/form-label:Command/present-width:full-width'.
-				   '/ini-list-section:whitelist/ini-list-array:bin',
- 'defined/arguments'		=> 'req:n/type:str/data:name/minlen:   0/maxlen:   4000/injourney:user-enters-text/form-label:Command Arguments (With Substitution Points)/present-width:full-width',
- 'defined/defaultfile'		=> 'req:n/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text/form-label:Default File (blank for none) {LOCALFILE}'.
-				   '/provides-defaults/gives-default-for-table:running/gives-default-for-column:localfile',
- 'defined/defaultrpmap'		=> 'req:n/type:int/data:port/minval:1024/maxval:  65535/injourney:user-selects-from-list-in-other-table/form-label:Port And URL Prefix Combo'.
-				   '/provides-defaults/gives-default-for-table:running/gives-default-for-column:rpmap'.
-				   '/is-pointer-to:rpmap/pointer-links-by:number/shown-by:number,urlprefix',
+ 'defined/FOR_THIS_APP'		    =>  'title:Services'
+		            	    	   .'/new-form-title:			    Define A Service'
+		            		       .'/allow-delete-by:			    uuid'
+	            		    	   .'/row-must-exist-in:	    	conf'
+		            	    	   .'/must-exist-in-fails-message:	You can&apos;t create a service until you create a configuration.'
+		            		       .'/friendly-object-name:		    service'
+		            		       .'/instance-friendly-name-is:	name'
+		            		       .'/toplink:				        services'
+		            		       ,
+ 'defined/pointer_to_conf'	    =>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Under Configuration/dont-show'.
+			            	        '/is-pointer-to:conf/pointer-links-by:uuid/shown-by:basefilepath',
+ 'defined/uuid'		    	    =>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
+ 'defined/name'		    	    =>  'req:y/type:str/data:name/minlen:   1/maxlen:     50/injourney:user-enters-text/form-label:Service Name',
+ 'defined/description'	    	=>  'req:n/type:str/data:name/minlen:   0/maxlen:   4000/injourney:user-enters-text/form-label:Service Description',
+ 'defined/command'	    	    =>  'req:y/type:str/data:cmd /minlen:   1/maxlen:    500/injourney:user-selects-from-ini-list/form-label:Command/present-width:full-width'.
+				                    '/ini-list-section:whitelist/ini-list-array:bin',
+ 'defined/arguments'		    =>  'req:n/type:str/data:name/minlen:   0/maxlen:   4000/injourney:user-enters-text/form-label:Command Arguments (With Substitution Points)/present-width:full-width',
+ 'defined/defaultfile'	    	=>  'req:n/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text/form-label:Default File (blank for none) {LOCALFILE}'.
+				                    '/provides-defaults/gives-default-for-table:running/gives-default-for-column:localfile',
+ 'defined/defaultrpmap'		    =>  'req:n/type:int/data:port/minval:1024/maxval:  65535/injourney:user-selects-from-list-in-other-table/form-label:Port And URL Prefix Combo'.
+			                	    '/provides-defaults/gives-default-for-table:running/gives-default-for-column:rpmap'.
+			            	        '/is-pointer-to:rpmap/pointer-links-by:number/shown-by:number,urlprefix',
  # ---------------------------------------------------------------------------
- 'running/FOR_THIS_APP'		=> 'title:Processes (Started Services)'
-				   .'/new-form-title:			Start A Service'
-				   .'/table-method:check,Check All Processes'
-				   .'/each-row-method:stdout,View output,uuid;stop,Stop Process,uuid;check,Check If Still Running,uuid'
-				   .'/row-must-exist-in:		defined'
-				   .'/must-exist-in-fails-message:	No defined services to start.'
-				   .'/defaults-provided-by:		defined'
-				   .'/defaults-in-provider-keyed-by:	uuid'
-				   .'/defaults-here-keyed-by:		pointer_to_defined'
-				   .'/friendly-object-name:		process'
-				   .'/instance-friendly-name-is:	pid'
-				   .'/backref-by:			uuid'
-				   .'/toplink:				processes'
-				   ,
- 'running/uuid'			=> 'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
- 'running/pointer_to_defined'	=> 'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Instance Of'.
-				   '/is-pointer-to:defined/pointer-links-by:uuid/shown-by:name'.
-				   '/display-using-other-table/display-sql-SELECT:name/display-sql-FROM:defined/display-sql-WHERE:uuid/display-sql-IS:pointer_to_defined',
- 'running/pid'			=> 'req:y/type:int/data:pid /minval:   2/maxval:4194304/injourney:app-generates/form-label:Process ID',
- 'running/localfile'		=> 'req:n/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localfile/form-label:Local File {LOCALFILE}/present-width:full-width',
- 'running/rpmap'		=> 'req:n/type:int/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Location (Port and URL Prefix)/must-be-unique'.
-	   			   '/is-pointer-to:rpmap/pointer-links-by:number/shown-by:number,urlprefix'.
-				   '/display-using-other-table/display-sql-SELECT:number,urlprefix/display-sql-FROM:rpmap/display-sql-WHERE:number/display-sql-IS:rpmap',
- 'running/lastchecked'		=> 'req:n/type:str/data:date/minlen:   0/maxlen:       0/injourney:row-method/form-label:Last Checked',
+ 'running/FOR_THIS_APP'		    =>  'title:Processes (Started Services)'
+				                   .'/new-form-title:		    	Start A Service'
+				                   .'/table-method:check,Check All Processes'
+				                   .'/each-row-method:stdout,View output,uuid;stop,Stop Process,uuid;check,Check If Still Running,uuid'
+				                   .'/row-must-exist-in:		        defined'
+				                   .'/must-exist-in-fails-message:	No defined services to start.'
+				                   .'/defaults-provided-by:	    	defined'
+				                   .'/defaults-in-provider-keyed-by:	uuid'
+				                   .'/defaults-here-keyed-by:		pointer_to_defined'
+				                   .'/friendly-object-name:	    	process'
+				                   .'/instance-friendly-name-is: 	pid'
+				                   .'/backref-by:		        	uuid'
+				                   .'/toplink:			        	processes'
+				                   ,
+ 'running/uuid'			        =>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
+ 'running/pointer_to_defined'   =>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Instance Of'.
+			            	        '/is-pointer-to:defined/pointer-links-by:uuid/shown-by:name'.
+				                    '/display-using-other-table/display-sql-SELECT:name/display-sql-FROM:defined/display-sql-WHERE:uuid/display-sql-IS:pointer_to_defined',
+ 'running/pid'		    	    =>  'req:y/type:int/data:pid /minval:   2/maxval:4194304/injourney:app-generates/form-label:Process ID',
+ 'running/localfile'		    =>  'req:n/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localfile/form-label:Local File {LOCALFILE}/present-width:full-width',
+ 'running/rpmap'		        =>  'req:n/type:int/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Location (Port and URL Prefix)/must-be-unique'.
+	   			                    '/is-pointer-to:rpmap/pointer-links-by:number/shown-by:number,urlprefix'.
+				                    '/display-using-other-table/display-sql-SELECT:number,urlprefix/display-sql-FROM:rpmap/display-sql-WHERE:number/display-sql-IS:rpmap',
+ 'running/lastchecked'	    	=>  'req:n/type:str/data:date/minlen:   0/maxlen:       0/injourney:row-method/form-label:Last Checked',
  # ---------------------------------------------------------------------------
- 'maint/FOR_THIS_APP'		=> 'title:Maintenance Command Requests'
-				   .'/new-form-title:			Maintenance Request'
-				   .'/allow-delete-by:			uuid'
-				   .'/single-row-only'
-				   .'/single-row-only-empty-message:	No active maintenance request.'
-				   .'/friendly-object-name:		maintenance request'
-				   .'/instance-friendly-name-is:	request'
-				   .'/each-row-method:execute,Execute maintenance request,uuid'
-				   .'/toplink:				MR'
-				   ,
- 'maint/uuid'			=> 'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:MRN',
- 'maint/request'		=> 'req:y/type:str/data:name/minlen:   1/maxlen:      64/injourney:user-selects-from-this-list/form-label:Action/this-list:deldb=Delete Database',
- 'maint/mkey'			=> 'req:y/type:str/data:name/minlen:  16/maxlen:    256/injourney:user-enters-text/form-label:Enter A Confirmation Password'.
-				   '/is-confirmation-key-for:execute/confirmation-placeholder:Enter Confirmation Password',
+ 'maint/FOR_THIS_APP'	    	=>  'title:Maintenance Command Requests'
+				                   .'/new-form-title:			    Maintenance Request'
+			                	   .'/allow-delete-by:			    uuid'
+			                	   .'/single-row-only'
+		            	    	   .'/single-row-only-empty-message:No active maintenance request.'
+			                	   .'/friendly-object-name:		    maintenance request'
+			                	   .'/instance-friendly-name-is:	request'
+		            	    	   .'/each-row-method:execute,Execute maintenance request,uuid'
+		            	    	   .'/toplink:				        MR'
+			                	   ,
+ 'maint/uuid'	       	    	=>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:MRN',
+ 'maint/request'	        	=>  'req:y/type:str/data:name/minlen:   1/maxlen:      64/injourney:user-selects-from-this-list/form-label:Action/this-list:deldb=Delete Database',
+ 'maint/mkey'		         	=>  'req:y/type:str/data:name/minlen:  16/maxlen:    256/injourney:user-enters-text/form-label:Enter A Confirmation Password'.
+				                    '/is-confirmation-key-for:execute/confirmation-placeholder:Enter Confirmation Password',
  # ---------------------------------------------------------------------------
- 'trashcan/FOR_THIS_APP'	=> 'title:Recycle Bin'
-				   .'/allow-delete-by:			uuid'
-				   .'/each-row-method:restart,Restart This Process,uuid'
-				   .'/friendly-object-name:		previous process'
-				   .'/instance-friendly-name-is:	previous process'
-				   .'/erase-upon-clear-logs'
-				   ,
- 'trashcan/uuid'		=> 'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
- 'trashcan/pointer_to_defined'	=> 'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Instance Of'.
-				   '/is-pointer-to:defined/pointer-links-by:uuid/shown-by:name'.
-				   '/display-using-other-table/display-sql-SELECT:name/display-sql-FROM:defined/display-sql-WHERE:uuid/display-sql-IS:pointer_to_defined',
- 'trashcan/localfile'		=> 'req:n/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localfile/form-label:Local File {LOCALFILE}',
- 'trashcan/rpmap'		=> 'req:n/type:int/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Port And URL Prefix Combo'.
-	   			   '/is-pointer-to:rpmap/pointer-links-by:number/shown-by:number,urlprefix'.
-				   '/display-using-other-table/display-sql-SELECT:number,urlprefix/display-sql-FROM:rpmap/display-sql-WHERE:number/display-sql-IS:rpmap',
+ 'trashcan/FOR_THIS_APP'	    =>  'title:Recycle Bin'
+			                	   .'/allow-delete-by:			    uuid'
+			                	   .'/each-row-method:restart,Restart This Process,uuid'
+			                	   .'/friendly-object-name:		    previous process'
+			                	   .'/instance-friendly-name-is:	previous process'
+			            	       .'/erase-upon-clear-logs'
+			            	       ,
+ 'trashcan/uuid'	    	    =>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
+ 'trashcan/pointer_to_defined'	=>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Instance Of'.
+				                    '/is-pointer-to:defined/pointer-links-by:uuid/shown-by:name'.
+				                    '/display-using-other-table/display-sql-SELECT:name/display-sql-FROM:defined/display-sql-WHERE:uuid/display-sql-IS:pointer_to_defined',
+ 'trashcan/localfile'	    	=>  'req:n/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localfile/form-label:Local File {LOCALFILE}',
+ 'trashcan/rpmap'		        =>  'req:n/type:int/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Port And URL Prefix Combo'.
+	   			                    '/is-pointer-to:rpmap/pointer-links-by:number/shown-by:number,urlprefix'.
+				                    '/display-using-other-table/display-sql-SELECT:number,urlprefix/display-sql-FROM:rpmap/display-sql-WHERE:number/display-sql-IS:rpmap',
  );
 
-function HOMEPAGE() {
-# Called when the action is "show" and the table is "none."
+# ----------------------------------------------------------------------------
+# == = = = = = = = = = = = = = = CALLABLES  = = = = = = = = = = = = = = = = ==
+# ----------------------------------------------------------------------------
 
- # Friendly introduction.
+# Section Index:
+# - HOMEPAGE()
+# - GENERATOR_xxx()
+# - ROWMETHOD_xxx()
+# - BUTTONHTML_xxx()
+# - BUTTONFALLOFF_xxx()
+# - VALIDATOR_xxx()
+
+function HOMEPAGE() {
+# Called via null_request() when the action is "show", the table is "none.",
+# and $GLOBALS["output_format"] is "html".
+# Uses $GLOBALS["username"].
+
+ # Basically, a friendly, standard introduction.
  htmlout("<p>This is <span class='tt'>lsc</span> - Lawrence's Service Controller.</p>");
  htmlout("<p><span class='tt'>lsc</span> allows you to define <i>services</i>, and once defined, start and stop them.</p>");
  htmlout("<p>A service is a command that takes a filename, URL prefix, and/or a port number as part of its arguments.  These types of commands typically serve files over your network or the Internet and may be something you wish to conveniently start and stop remotely.</p>");
@@ -151,7 +147,6 @@ function HOMEPAGE() {
 
 # ----------------------------------------------------------------------------
 # [ === GENERATOR functions ]
-# ----------------------------------------------------------------------------
 # - When the user wants to create a new row, column data for that table can be
 #   supplied by the user, or generated by the app.
 # - For columns that are app generated, generators are called to supply the
@@ -159,6 +154,8 @@ function HOMEPAGE() {
 # - Generators may also make the app perform an action.
 # - If a generator returns false, it is assumed something went wrong and a new
 #   database row is not created.
+# - The value that the generator is giving back to be put in the database is
+#   in &$returned_value passed by reference.
 # (See function generate_app_value().)
 #
 # GENERATOR_xxx parameters:
@@ -168,6 +165,8 @@ function HOMEPAGE() {
 # - $in_col: column needing new value.
 # - $in_array_col_attrs: column attributes from global schema definition.
 # - $in_PARAMS:
+# ----------------------------------------------------------------------------
+
 
 function GENERATOR_pid (
  &$returned_value, $in_table, $in_col, $in_array_col_attrs, $in_PARAMS, $in_ini
@@ -307,9 +306,8 @@ function GENERATOR_pid (
 
 # ----------------------------------------------------------------------------
 # [ === ROW METHOD HANDLER functions ]
-# ----------------------------------------------------------------------------
 # - Row methods are specified in a table's FOR_THIS_APP virtual column.
-# - Row method handlers could do anything that isn't specific to a column.
+# ----------------------------------------------------------------------------
 
 function ROWMETHOD_execute_maint(
  $in_table, $in_target, $in_target_table, $in_PARAMS, $in_ini
@@ -536,9 +534,9 @@ function ROWMETHOD_restart_trashcan (
 
 # ----------------------------------------------------------------------------
 # [ === BUTTONHTML functions ]
-# ----------------------------------------------------------------------------
 # - Emit HTML to render button when one exists in the action history.
 #   Normally called by output_log().
+# ----------------------------------------------------------------------------
 
 function BUTTONHTML_restart($in_button_type_target) {
  $outstr="\n <tr><td class='logbutton-container'><form action='".$GLOBALS["scriptname"]."' method=post>"
@@ -559,13 +557,13 @@ function BUTTONHTML_restarted($in_button_type_target) {
 
 # ----------------------------------------------------------------------------
 # [ === BUTTONFALLOFF functions ]
-# ----------------------------------------------------------------------------
 # - The action history only holds so many items. 
 #   When an item in the action history table ("log") is deleted, and that
 #   log entry has a button, this is called to provide an opportunity to clean
 #   it up.
 # - Note: When the entire log is cleared, "erase-upon-clear-log" can handle
 #   the cleanup for any tables referenced by buttons in the "log" table.
+# ----------------------------------------------------------------------------
 
 function BUTTONFALLOFF_restart($in_button_type_target) {
  delete_row_bypass_schema("trashcan","uuid",$in_button_type_target,false);
@@ -578,9 +576,9 @@ function BUTTONFALLOFF_restarted($in_button_type_target) {
 
 # ----------------------------------------------------------------------------
 # [ === VALIDATOR functions ]
-# ----------------------------------------------------------------------------
 # - Can be provided for any row_column combination.  Will be called when new
 #   row data is being validated.  Expected to return true (OK) or false (bad).
+# ----------------------------------------------------------------------------
 
 function VALIDATOR_defined_arguments ( $in_data ) {
  $nbrackets=0; $firstflag=false;
@@ -607,21 +605,47 @@ function VALIDATOR_defined_arguments ( $in_data ) {
  return true;
  }
 
-# ------------------------------------------------------------
-# [ Main ]
-# ------------------------------------------------------------
+
+# ----------------------------------------------------------------------------
+# == = = = = = = = = = = = = =  END CALLABLES = = = = = = = = = = = = = = = ==
+# ----------------------------------------------------------------------------
+
+# ----------------------------------------------------------------------------
+# == = = = = = = = = = = = = = = = = MAIN = = = = = = = = = = = = = = = = = ==
+# ----------------------------------------------------------------------------
+
+# Get script name.
+# - Essential when the output format is HTML - used to generate the URL in
+#   <form> elements and the "[OK]" links that reload the page after the user
+#   views the response.
+$my_name_tmp=explode('/',$_SERVER['SCRIPT_NAME']);
+$my_name=$my_name_tmp[array_key_last($my_name_tmp)];
+
+# Get the current user and hostname.
+# - Used in HTML output and possibly needed by generators.
+# - The username that the script is running as is also used in determining
+#   where to find the .INI file.
+$user=get_current_user(); $hostname=gethostname();
+
+# Above needed for this very important function that sets a plethora of
+# global variables.
+set_globals($user,$hostname,$my_name);
 
 # Get and validate "action" query string from HTTP request.
 # - validate_action() will populate a default action if needed, including
 #   setting the action to 'uid-0-muzzle' if this happens to be running as
 #   root.
 $ACTION=validate_action(@$_POST["action"]);
+
 # Get and validate "format" query string from HTTP request.
 # - validate_output_format() will populate a default output format if
 #   needed--html--or set it to html if an unsupported format is requested.
 $GLOBALS["output_format"]=validate_output_format(@$_GET["format"]);
+output_buffer_setup($GLOBALS["output_format"]);
 
 # Safety: Only set $ini_file if not UID 0.
+# - .INI file contains location of database, without it, the database is not
+#   going to get read.
 # - If this app is mistakenly run as root, the .ini file isn't even touched,
 # and that means things like the database are not possible to know.
 if($ACTION!="uid-0-muzzle") {
@@ -630,10 +654,18 @@ if($ACTION!="uid-0-muzzle") {
 
 # What table are we working on?
 # - "none" is a default value, will be overriden by "table" value in $_GET[]
-# or $_POST[] later.
+# or $_POST[] later, and if it's not, then we handle that specially.
 $table="none";
 
+# ----------------------------------------------------------------------------
 # Execute action.
+# Everything is centered around the database so any action will be in terms
+# of that database. Things that are not database operations must be expressed
+# as side effects in GENERATOR_ or ROWMETHOD_ functions.
+# The only exception made is "clear_log" which simply clears the action
+# history.
+# ----------------------------------------------------------------------------
+
 switch ($ACTION) {
  case "new_row":
  # ---------------------------------------------------------------------------
@@ -796,14 +828,18 @@ switch ($ACTION) {
   break;
  }
 
-# Begin outputting HTML.
-start_output($P["table"]);
-
+# ----------------------------------------------------------------------------
+# Generate output / report results.
 # Report results of action, in a manner dependent upon the specific action.
 # - Action "show" (which is default if none is specified), will output the
 #   table.
-# - If the action is "show" and the table is "none", the homepage is
-#   outputted.
+# - If the action is "show" and the table is "none", null_request() is 
+#   invoked - for "html" format this might display a usage page.
+# ----------------------------------------------------------------------------
+
+start_output($P["table"]);
+
+# Generate return link.
 $return_link=$my_name;
 if(isset($P["return_to"]) and $P["return_to"]!=="optional") {
  $return_link.="?table=".$P["return_to"];
@@ -817,7 +853,7 @@ if($GLOBALS["output_format"]!=="html") {
  }
 
 # Nothing beyond this point should be writing to the database.
-# Reading may still be possible.
+# Reading database may still happen, though.
 end_any_sql_transaction();
 
 switch ($ACTION) {
@@ -869,7 +905,6 @@ switch ($ACTION) {
    output_messages();
    content_panel_end();
  }
-
 history_panel_end();
 
 # Output any generated Javascript.
@@ -919,8 +954,38 @@ switch ($GLOBALS["output_format"]) {
 exit;
 
 # ----------------------------------------------------------------------------
-# [ Row method handling functions ]
+# == = = = = = = = = = = = = = = = END MAIN = = = = = = = = = = = = = = = = ==
 # ----------------------------------------------------------------------------
+
+# Section Index:
+# - Null request handler
+# - Row method handling functions
+# - Section output start and stop
+# - Content output functions (stuff that goes in sections)
+# - Schema definition parsing functions
+# - Handling generated data
+# - Handling provided data via HTTP Request
+# - HTTP "action" and "format" query string
+# - Table/table form output support
+# - Presentation support
+# - Filename functions
+# - Internal executable blacklist
+# - Database access checking functions
+# - Database read and write functions (high-level)
+# - Database read and write functions (low-level)
+# - Output buffer related
+# - Error reporting, status checking, and notification
+# - Initialization-related
+# - Code I borrowed from somewhere else
+# - Style sheet
+
+
+# ----------------------------------------------------------------------------
+# [ Null request handler ]
+# Called by main when the action is "show" and the table is "none."  Will
+# dispatch or handle according to $GLOBALS["output_format"].
+# ----------------------------------------------------------------------------
+
 
 function null_request() { 
  switch ($GLOBALS["output_format"]) {
@@ -936,6 +1001,11 @@ function null_request() {
   break;
   }
  }
+
+
+# ----------------------------------------------------------------------------
+# [ Row method handling functions ]
+# ----------------------------------------------------------------------------
 
 
 function row_method_action(
@@ -990,259 +1060,9 @@ function row_method_action(
   } 
  }
 
-# ----------------------------------------------------------------------------
-# [ Utility and convenience functions ]
-# ----------------------------------------------------------------------------
-
-# Convenience functions - output various items.
-# ----------------------------------------------------------------------------
-
-function tblnam($in_table_name) {
- return "table '".$in_table_name."'";
- }
-
-
-function colnam($in_col_name) {
- return "column '".$in_col_name."'";
- }
-
-
-function actnam($in_action_name) {
- return "action '".$in_action_name."'";
- }
-
-# Convenience functions - "Is it OK to go to the next step"-type functions.
-# ----------------------------------------------------------------------------
-
-function any_errors(){
- if(count($GLOBALS["outmsgs"]["errors"])!=0) { return true; }
- return false;
- }
-
-
-function bounce_readonly($in_action) {
-# merr() adds to $GLOBALS["outmsgs"]["errors"], and if that array has more
-# than 0 elements, outer code is responsible for checking that.
-
- if($GLOBALS["readonly"]) {
-  merr("application is in read-only mode, ".actnam($in_action)." won't be executed.");
-  }
- }
-
-
-function bounce_no_toplink($in_which_table) {
-# Tables without a "toplink" table scheaa attribute are assumed to not want to
-# be modified or viewed externally.
-
- if($in_which_table==="") { return; }
- if($in_which_table==="none") { return; }
- $table_metadata=schema_rowattr($in_which_table.'/FOR_THIS_APP');
- if(!isset($table_metadata["toplink"])) {
-  merr("Requests involving this table from this interface are not accepted.","hack");
-  }
- }
-
-# Functions that add messages to any of the message stacks.
-#
-# Outer code that handles output will check message stack and output messages
-# there in a format suitable for the type.
-#
-# Presence of anything in the "errors" stack (which is
-# $GLOBALS["outmsgs"]["errors"]) means an error ocurred.
-# ----------------------------------------------------------------------------
-
-function mdebug($in_msg_text) {
-# Debug messages.
- $GLOBALS["outmsgs"]["debug"][]=$in_msg_text;
- }
-
-
-function mnotice($in_msg_text) {
-# Notices.
- $GLOBALS["outmsgs"]["notices"][]=$in_msg_text; 
- }
-
-
-function mbutton($in_button_html_text) {
-# HTML buttons.
- $GLOBALS["outmsgs"]["buttons"][]=$in_button_html_text;
- }
-
-
-function flag($in_flags) {
-# Set appropriate global variable according to provided flag tags.
-
- if($in_flags="bug" or $in_flags="bug_or_hack"){$GLOBALS["suspect_bug"]=true;}
- if($in_flags="hack" or $in_flags="bug_or_hack"){$GLOBALS["suspect_hack"]=true;}
- if($in_flags="bad_db"){$GLOBALS["bad_db"]=true;}
- }
-
-
-function merr($in_msg_text,$in_flags="") {
-# Error messages.
-# Also calls flag() above.
-
- $GLOBALS["outmsgs"]["errors"][]=$in_msg_text; 
- if($in_flags!=""){flag($in_flags);}
- }
-
-
-function mtrace($in_msg_text,$in_flags="") {
- if($in_flags==="") {
-  $GLOBALS["outmsgs"]["trace"][]=$in_msg_text;
-  } else {
-  $GLOBALS["outmsgs"]["trace"][]="[".$in_flags."] ".$in_msg_text;
-  }
- }
-
-function report_and_log($in_success,
-   			$in_eventdesc,$in_eventbody,
-			$offer_event_view=false,
-			$button_type="none", $button_type_target="none"
-			) {
-# 1. Issues a notice or error depending on first parameter which indicates
-#    whether something succeeded (true) or failed (false).
-# 2. Also writes in and other data optionally ($in_event_body) to the action
-#    history.
-# 3. Ends current SQL transaction and begins a new one.
-
- end_any_sql_transaction();
- begin_sql_transaction();
-
- if($in_success) { mnotice($in_eventdesc); }else{ merr($in_eventdesc); }
- $log_writing_result=log_entry("app",
-	   $in_eventdesc,$in_eventbody,
-	   $offer_event_view,$button_type,$button_type_target);
-
- $GLOBALS["sqltxn_commit"]=$log_writing_result;
- }
-
-
-# from https://gist.github.com/lorenzos/1711e81a9162320fde20
-# ----------------------------------------------------------------------------
-	/**
-	 * Slightly modified version of http://www.geekality.net/2011/05/28/php-tail-tackling-large-files/
-	 * @author Torleif Berger, Lorenzo Stanco
-	 * @link http://stackoverflow.com/a/15025877/995958
-	 * @license http://creativecommons.org/licenses/by/3.0/
-	 */
-	function tailCustom($filepath, $lines = 1, $adaptive = true) {
-
-		// Open file
-		$f = @fopen($filepath, "rb");
-		if ($f === false) return false;
-
-		// Sets buffer size, according to the number of lines to retrieve.
-		// This gives a performance boost when reading a few lines from the file.
-		if (!$adaptive) $buffer = 4096;
-		else $buffer = ($lines < 2 ? 64 : ($lines < 10 ? 512 : 4096));
-
-		// Jump to last character
-		fseek($f, -1, SEEK_END);
-
-		// Read it and adjust line number if necessary
-		// (Otherwise the result would be wrong if file doesn't end with a blank line)
-		if (fread($f, 1) != "\n") $lines -= 1;
-		
-		// Start reading
-		$output = '';
-		$chunk = '';
-
-		// While we would like more
-		while (ftell($f) > 0 && $lines >= 0) {
-
-			// Figure out how far back we should jump
-			$seek = min(ftell($f), $buffer);
-
-			// Do the jump (backwards, relative to where we are)
-			fseek($f, -$seek, SEEK_CUR);
-
-			// Read a chunk and prepend it to our output
-			$output = ($chunk = fread($f, $seek)) . $output;
-
-			// Jump back to where we started reading
-			fseek($f, -mb_strlen($chunk, '8bit'), SEEK_CUR);
-
-			// Decrease our line counter
-			$lines -= substr_count($chunk, "\n");
-
-		}
-
-		// While we have too many lines
-		// (Because of buffer size we might have read too many)
-		while ($lines++ < 0) {
-
-			// Find first newline and remove all text before that
-			$output = substr($output, strpos($output, "\n") + 1);
-
-		}
-
-		// Close file and return
-		fclose($f);
-		return trim($output);
-
-	}
-# ----------------------------------------------------------------------------
-
-# from https://www.uuidgenerator.net/dev-corner/php
-# ----------------------------------------------------------------------------
-function guidv4($data = null) {
-    // Generate 16 bytes (128 bits) of random data or use the data passed into the function.
-    $data = $data ?? random_bytes(16);
-    assert(strlen($data) == 16);
-
-    // Set version to 0100
-    $data[6] = chr(ord($data[6]) & 0x0f | 0x40);
-    // Set bits 6-7 to 10
-    $data[8] = chr(ord($data[8]) & 0x3f | 0x80);
-
-    // Output the 36 character UUID.
-    return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($data), 4));
-}
-# ----------------------------------------------------------------------------
-
-
-function path_merge($path1,$path2) {
-# Merge two paths, making sure there is only one slash in between.
-
- $merged=rtrim($path1,"/")."/".ltrim($path2,"/");
- return $merged;
- }
-
-
-function make_filename_ready($in_string) {
-# Take incoming string and make it a well behaved filename.
-
- if(is_null($in_string)) { return guidv4(); }
- $out_string="";
- for($i=0;$i<strlen($in_string);$i++){
-  if(str_contains('\\/?* @$&:;,.><|',$in_string[$i])) {
-   $out_string.='_';
-   } else { 
-   $out_string.=$in_string[$i];
-   }
-   if($i>40){ break; } # Max 40 chars.
-  }
-  return $out_string;
- }
-
-
-function timestamp_to_string($in_timestamp) {
-# * Uses $GLOBALS["tz"].
-# Converts timestamp to date('m/d/Y h:i:s a').
-
- if(!isset($GLOBALS["tz"])) {
-  return date('m/d/Y h:i:s a', $in_timestamp);
-  } else { 
-  # https://stackoverflow.com/questions/12038558/php-timestamp-into-datetime
-  # Timezone is IGNORED when using timestamp. WTF.
-  $date=date_create('@'.$in_timestamp+$GLOBALS["utc_offset"]);
-  return date_format($date,'m/d/Y h:i:s a');
-  }
- }
 
 # ----------------------------------------------------------------------------
-# General HTML output functions
+# Section output start and stop
 # ----------------------------------------------------------------------------
 
 
@@ -1433,11 +1253,12 @@ function finish_output() {
  }
 
 # ----------------------------------------------------------------------------
-# [ HTML form output functions ]
+# [ Content output functions - mostly HTML centered with other output formats 
+#   kinda tacked on. ]
 # ----------------------------------------------------------------------------
 
 function output_log($in_return_link) {
-# Output log table (history of actions)
+# Output "Action History" table.
  if($GLOBALS["output_format"]!=="html") { return; } # HTML format only.
 
  htmlout("<table class='non-editable-table'>");
@@ -1496,12 +1317,12 @@ function output_table_noneditable($in_which_table,$in_rows_array) {
  # Table metadata needed.
  $table_metadata=schema_rowattr($in_which_table."/FOR_THIS_APP");
 
- # Begin generating our table
+ # Start generating pieces of the table.
  output_table_noneditable_container_start();
  output_table_noneditable_title($table_metadata["title"]);
 
- # Options flag - set if we have an extra column for the user to do things to
- # the row, like delete or row methods.
+ # Options flag - set if we need extra space for buttons - buttons such as
+ # the delete button or row method buttons.
  $options=false;
  if($GLOBALS["output_format"]==="html") {
   # Options column is an HTML thing only.
@@ -1509,7 +1330,7 @@ function output_table_noneditable($in_which_table,$in_rows_array) {
   if(isset($table_metadata['each-row-method'])){ $options=true; }
   }
 
- # Get column headers (thead).
+ # Get column headers (rendered as left side of table row)
  $headers=Array();
  $attrs_cols=Array();
  foreach($cols as $col) {
@@ -1741,9 +1562,6 @@ function output_table_noneditable_container_end() {
  htmlout("</table>");
  htmlout("</div>");
  }
-
-# ----------------------------------------------------------------------------
-# ----------------------------------------------------------------------------
 
 
 function output_new_form($in_which_table,$in_rows_count,$in_ini) {
@@ -2031,81 +1849,9 @@ function new_form_defaults_from_table($in_which_table,
  }
 
 
-function make_presentable($in_data,$in_type) {
- $out_data="";
- switch ($in_type) {
-  case "pid":
-   if($GLOBALS["output_format"]==="html") { $out_data="<span class='presenting-pid'>"; }
-   $out_data.="PID ".$in_data;
-   if($GLOBALS["output_format"]==="html") { $out_data.="</span>"; }
-   break;
-  case "uuid":
-   if($GLOBALS["output_format"]==="html") { $out_data="<span class='presenting-uuid'>"; }
-   $out_data.="UUID ".$in_data;
-   if($GLOBALS["output_format"]==="html") { $out_data.="</span>"; }
-   break;
-  case "date":
-   if($in_data==="") { 
-    $out_data="[No timestamp]";
-   } else {
-    $out_data=timestamp_to_string($in_data);
-   }
-   break;
-  default: 
-   $out_data=$in_data;
-  }
-  return $out_data;
- } 
-
 # ----------------------------------------------------------------------------
 # [ Schema definition parsing functions ]
 # ----------------------------------------------------------------------------
-
-function set_report_names_for_insert($in_which_table,$in_data_array) {
- $GLOBALS["report"]["target_objectname"]="'".$in_which_table."' object";
- $GLOBALS["report"]["target_instancename"]="instance";
- if(!isset($GLOBALS["schemadef"][$in_which_table."/FOR_THIS_APP"])) { return; }
- $attrs=schema_rowattr($in_which_table."/FOR_THIS_APP");
- if(isset($attrs["friendly-object-name"])) {
-  $GLOBALS["report"]["target_objectname"]=$attrs["friendly-object-name"];
-  if(isset($in_data_array[@$attrs["instance-friendly-name-is"]])) {
-   $GLOBALS["report"]["target_instancename"]=$in_data_array[$attrs["instance-friendly-name-is"]];
-   }
-  }
- }
-
-
-function set_report_names_for_delete($in_which_table,$in_delete_target) {
-# Returns false if evidence suggests $in_delete_target isn't deletable.
-
- $GLOBALS["report"]["target_objectname"]="'".$in_which_table."' object";
- $GLOBALS["report"]["target_instancename"]="'".$in_delete_target."'";
- if(!isset($GLOBALS["schemadef"][$in_which_table."/FOR_THIS_APP"])) {
-  merr("No metadata for ".tblnam($in_which_table).".","bug");
-  return false;
-  }
- $attrs=Array();
- $attrs=schema_rowattr($in_which_table."/FOR_THIS_APP");
- if(isset($attrs["friendly-object-name"])) {
-  $GLOBALS["report"]["target_objectname"]=$attrs["friendly-object-name"];
-  }
- if(!isset($attrs["allow-delete-by"])) { 
-  merr("Delete requests involving ".tblnam($in_which_table)." are not processed through this interface. The request was not processed.","hack");
-  return false;
-  }
- if(isset($attrs["instance-friendly-name-is"])) {
-  $gotten_row=Array();
-  $result=read_row_expecting_just_one($gotten_row,$in_which_table,$attrs["allow-delete-by"],$in_delete_target);
-  if($result===false) {
-   $GLOBALS["report"]["target_instancename"]="(Missing Object)";
-   mnotice("This was already deleted. If you are confused look at the Action History.");
-   return false;
-  } else { 
-   $GLOBALS["report"]["target_instancename"]=$gotten_row[$attrs["instance-friendly-name-is"]];
-   }
-  }
-  return true;
- }
 
 
 function tables_from_schemadef() {
@@ -2275,46 +2021,49 @@ function parse_out_injourney_info($in_attrs) {
  }
 
 # ----------------------------------------------------------------------------
-# [ HTTP query processing and validation functions ]
+# [ Handling generated data ]
 # ----------------------------------------------------------------------------
 
-function validate_action($in_qsvar_action) {
- # Normalize the incoming 'action' query string, making sure it has only 
- # valid characters and is a valid length (16 characters or less).
- # - Whitelisting of valid action values can be done here.
- # - Default action if action query string is null, blank, or not specified is
- #   determined here.
- # - Also outright replace it and issue messages if certain conditions exist,
- #   for safety or administrative reasons.
- if(posix_getuid()==0){
-  merr("This application will not process requests when running as uid 0.");
-  return "uid-0-muzzle";
+function fill_data_array_from_app_generated_injourneys(
+ $in_which_table, &$out_array_data, $in_PARAMS,
+ $in_ini
+ ) {
+ # Goes through $in_PARAMS, looks for query strings whose "in journey" is
+ # "app-generates" and makes a generator call to get the data
+ #
+ # Both this function and fill_data_array_from_query_string are intended to
+ # collect data to the same array, $out_array_data (by reference).
+ #
+ # Will add errors to $GLOBALS["outmsgs"] if a generator call fails.
+ # Assumes table exists.
+
+ # Check table metadata ...
+ $table_metadata=schema_rowattr($in_which_table.'/FOR_THIS_APP');
+
+ # All right, loop through all columns as they appear in the provided schema
+ # definition.  For columns whose data is app generated, we make a generator
+ # call and get that data, or report an error if the generator reports a
+ # failure.
+ $columns=columns_from_schemadef($in_which_table);
+ foreach($columns as $col) {
+  $attrs=schema_rowattr($in_which_table.'/'.$col);
+  # call generator if needed to fill in this value.
+  if($attrs["injourney"]==="app-generates") {
+   $value='';
+   $result=generate_app_value($value,
+			      $in_which_table,$col,$attrs,
+			      $in_PARAMS,
+			      $in_ini
+			      );
+   if(!($result)) {
+    merr("Failed.");
+    }else{
+    $out_array_data[$col]=$value;
+    }
+   }
   }
- if($GLOBALS["disabled"]){
-  mnotice("This application is currently not processing requests.");
-  return "disabled";
-  }
- if($GLOBALS["readonly"]){
-  mnotice("This application is currently in read-only mode.");
-  }
- $out_action="show";
- if(isset($in_qsvar_action)) {
-  $tmp=trim(strtolower(substr($in_qsvar_action,0,16)));
-  $out_action=$tmp;
-  }
-  return $out_action;
  }
 
-
-function validate_output_format($in_qsvar_format) { 
- if(isset($in_qsvar_format)) {
-  $tmp=trim(strtolower(substr($in_qsvar_format,0,16)));
-   if($tmp==="html") { return "html"; }
-   if($tmp==="text") { $out_format="text"; return "text"; }
-   mdebug("unsupported output format \".$in_qsvar_format.\" requested","hack");
-  }
-  return "html";
- }
 
 function generate_app_value(
  &$returned_value, $in_which_table, $in_which_col,
@@ -2322,13 +2071,13 @@ function generate_app_value(
  $in_PARAMS,
  $in_ini
  ) {
- # When inserting a new row, some values are provided by the request and
- # others are provided by code - my name for this code is a "generator."
- # generate_app_value() will call the generator and forward back the results.
- # - Generator name taken from $in_array_col_attrs["data"], this should come
- #   from the global schema definition.
- # - Built-in generators are handled here.
- #
+# When inserting a new row, some values are provided by the request and
+# others are provided by code - my name for this code is a "generator."
+# generate_app_value() will call the generator and forward back the results.
+# - Generator name taken from $in_array_col_attrs["data"], this should come
+#   from the global schema definition.
+# - Built-in generators are handled here.
+ 
  $method=trim($in_array_col_attrs["data"]);
  # So, let's see if a callable exists.
  $function="GENERATOR_".$method;
@@ -2353,89 +2102,67 @@ function generate_app_value(
   return false;
  }
 
-function find_and_sanitize_incoming(
- $in_POST=Array(),$in_GET=Array(),&$in_out_SAFE_PARAMS
+
+# ----------------------------------------------------------------------------
+# [ Handling provided data via HTTP request ]
+# ----------------------------------------------------------------------------
+
+
+function fill_data_array_from_query_string(
+ $in_which_table, $in_PARAMS, &$out_array_data
  ) {
- # How this works:
- #  *** First:
- #  &$in_out_SAFE_PARAMS is an associative array reference..
- #  &$in_out_SAFE_PARAMS's keys should be query string parameters you are
- #   expecting.
- #  This function will loop through &$in_out_SAFE_PARAMS, extract matching keys'
- #   values from $in_POST, sanitize them, and then put the sanitized values in
- #   &$in_out_SAFE_PARAMS.
- #  Errors or problems are reported in $GLOBALS["outmsgs"].
- #  Missing values are an error unless the key in &$in_out_SAFE_PARAMS is set
- #   to 'optional'.
- #  $in_POST should be $_POST.
- #  *** Then the above is done for $in_GET, but only for supported parameters.
- #  And only if the parameters weren't defined in $in_POST.
- foreach($in_out_SAFE_PARAMS as $key=>$value) {
-  if(isset($in_POST[$key])) {
-   $in_out_SAFE_PARAMS[$key]=$in_POST[$key];
-   sanitize_app_parameter($in_out_SAFE_PARAMS[$key]);
-   }else{
-   if(!($value="optional")) {
-    merr("Missing query string parameter '".$key."'");
+ # Goes through $in_PARAMS, looks for query strings that match the columns in
+ # $in_which_table, and puts them in $out_array_data.  $in_PARAMS would
+ # normally just be $_POST or similar.
+ #
+ # Will add errors to $GLOBALS["outmsgs"] if a column can't be matched with a query
+ # string parameter (and the column's "in journey" is not "app-generates").
+ #
+ # - Assumes table exists.
+
+ # Check table metadata ...
+ # (This is redundant if fill_data_array_from_app_generated_journeys() is
+ # called first.  Could be removed.)
+ #
+ $table_metadata=schema_rowattr($in_which_table.'/FOR_THIS_APP');
+
+ # All right, loop through all columns as they appear in the provided schema
+ # definition.  For columns that have a matching key in $in_PARAMS, we copy
+ # that data to $out_array_data.
+ #
+ # If no key is found for a column, and that column's data is not app generated
+ # then we report an error.
+ # 
+ # Yes, fill_data_array_from_app_generated_iourneys() should be called first.
+ #
+ $columns=columns_from_schemadef($in_which_table);
+ # Let's loop through each column, from the provided schema definition.
+ foreach($columns as $col) {
+  $attrs=schema_rowattr($in_which_table.'/'.$col);
+  # Does $in_PARAMS have a key with a value for this column?
+  if(isset($in_PARAMS[$in_which_table."_".$col])) {
+   $out_array_data[$col]=$in_PARAMS[$in_which_table."_".$col];
+   continue;
+   }
+  # If it does not
+  # That may be OK if the "in journey" for that column is app-generated.
+  # If it is not app-generated, we need to register an error, though.
+  if ($attrs["injourney"]==="row-method") { 
+   $out_array_data[$col]='';
+   continue;
+   }
+  if (!(isset($out_array_data[$col]))) {
+   if($attrs["injourney"]!="app-generates") {
+    merr("query string doesn't contain data for '".$col."'.","bug_or_hack");
     }
    }
   }
- if(isset($in_GET["table"])) {
-  if(
-     !(isset($in_out_SAFE_PARAMS["table"]))
-       or
-      ($in_out_SAFE_PARAMS["table"]=="")
-       or
-      ($in_out_SAFE_PARAMS["table"]==="none")
-      ) {
-   $in_out_SAFE_PARAMS["table"]=$in_GET["table"];
-   sanitize_app_parameter($in_out_SAFE_PARAMS["table"]);
-   }
-  }
  }
 
-
-function sanitize_app_parameter(&$parameter) {
-# Sanitize incoming "app parameters" - which used by the app itself.  Examples
-# would be the "action" query string.
-# Will modify or erase $parameter if needed.
- $tmp=trim($parameter);
- # TODO: check for length, illegal characters, etc.
- $parameter=$tmp;
- }
-
-
-function get_html_form_validators( $in_which_table ) {
- # Assumes we accept $in_which_table as known to be in the database already.
- $columns=columns_from_schemadef($in_which_table);
- $out_validators=Array();
- foreach($columns as $col) {
-  $attrs=schema_rowattr($in_which_table.'/'.$col);
-  $out_validators[$col]="";
-  # Validator "req".
-  if($attrs["req"]==="y") {
-   $out_validators[$col].=" required placeholder='{required}'";
-   }
-  # Validator "type" and related.
-  switch ($attrs["type"]) {
-   case "str":
-    if(isset($attrs["maxlen"])) { $out_validators[$col].=" maxlength=".$attrs["maxlen"]; }
-    if(isset($attrs["minlen"])) { $out_validators[$col].=" minlength=".$attrs["minlen"]; }
-    break;
-   case "int":
-    $out_validators[$col].=" type='number'";
-    if(isset($attrs["maxval"])) { $out_validators[$col].=" max=".$attrs["maxval"]; }
-    if(isset($attrs["minval"])) { $out_validators[$col].=" min=".$attrs["minval"]; }
-    break;
-   }
-  }
-  return $out_validators;
- }
-
-function validate_data_array(
+ function validate_data_array(
  $in_which_table, &$out_array_data
  ) {
- # Assumes $in_which_table is known to be in the database already.
+# Assumes $in_which_table is known to be in the database already.
 
  # All right, loop through all columns as they appear in the provided schema
  # definition.
@@ -2495,100 +2222,378 @@ function validate_data_array(
   }
  }
 
-function fill_data_array_from_app_generated_injourneys(
- $in_which_table, &$out_array_data, $in_PARAMS,
- $in_ini
+
+ function find_and_sanitize_incoming(
+ $in_POST=Array(),$in_GET=Array(),&$in_out_SAFE_PARAMS
  ) {
- # Goes through $in_PARAMS, looks for query strings whose "in journey" is
- # "app-generates" and makes a generator call to get the data
- #
- # Both this function and fill_data_array_from_query_string are intended to
- # collect data to the same array, $out_array_data (by reference).
- #
- # Will add errors to $GLOBALS["outmsgs"] if a generator call fails.
- # Assumes table exists.
+# How this works:
+#  *** First:
+#  &$in_out_SAFE_PARAMS is an associative array reference..
+#  &$in_out_SAFE_PARAMS's keys should be query string parameters you are
+#   expecting.
+#  This function will loop through &$in_out_SAFE_PARAMS, extract matching keys'
+#   values from $in_POST, sanitize them, and then put the sanitized values in
+#   &$in_out_SAFE_PARAMS.
+#  Errors or problems are reported in $GLOBALS["outmsgs"].
+#  Missing values are an error unless the key in &$in_out_SAFE_PARAMS is set
+#   to 'optional'.
+#  $in_POST should be $_POST.
+#  *** Then the above is done for $in_GET, but only for supported parameters.
+#  And only if the parameters weren't defined in $in_POST.
 
- # Check table metadata ...
- $table_metadata=schema_rowattr($in_which_table.'/FOR_THIS_APP');
-
- # All right, loop through all columns as they appear in the provided schema
- # definition.  For columns whose data is app generated, we make a generator
- # call and get that data, or report an error if the generator reports a
- # failure.
- $columns=columns_from_schemadef($in_which_table);
- foreach($columns as $col) {
-  $attrs=schema_rowattr($in_which_table.'/'.$col);
-  # call generator if needed to fill in this value.
-  if($attrs["injourney"]==="app-generates") {
-   $value='';
-   $result=generate_app_value($value,
-			      $in_which_table,$col,$attrs,
-			      $in_PARAMS,
-			      $in_ini
-			      );
-   if(!($result)) {
-    merr("Failed.");
-    }else{
-    $out_array_data[$col]=$value;
+ foreach($in_out_SAFE_PARAMS as $key=>$value) {
+  if(isset($in_POST[$key])) {
+   $in_out_SAFE_PARAMS[$key]=$in_POST[$key];
+   sanitize_app_parameter($in_out_SAFE_PARAMS[$key]);
+   }else{
+   if(!($value="optional")) {
+    merr("Missing query string parameter '".$key."'");
     }
+   }
+  }
+ if(isset($in_GET["table"])) {
+  if(
+     !(isset($in_out_SAFE_PARAMS["table"]))
+       or
+      ($in_out_SAFE_PARAMS["table"]==="")
+       or
+      ($in_out_SAFE_PARAMS["table"]==="none")
+      ) {
+   $in_out_SAFE_PARAMS["table"]=$in_GET["table"];
+   sanitize_app_parameter($in_out_SAFE_PARAMS["table"]);
    }
   }
  }
 
-function fill_data_array_from_query_string(
- $in_which_table, $in_PARAMS, &$out_array_data
- ) {
- # Goes through $in_PARAMS, looks for query strings that match the columns in
- # $in_which_table, and puts them in $out_array_data.  $in_PARAMS would
- # normally just be $_POST or similar.
- #
- # Will add errors to $GLOBALS["outmsgs"] if a column can't be matched with a query
- # string parameter (and the column's "in journey" is not "app-generates").
- #
- # - Assumes table exists.
 
- # Check table metadata ...
- # (This is redundant if fill_data_array_from_app_generated_journeys() is
- # called first.  Could be removed.)
- #
- $table_metadata=schema_rowattr($in_which_table.'/FOR_THIS_APP');
+function sanitize_app_parameter(&$parameter) {
+# Sanitize incoming "app parameters" - which used by the app itself.  Examples
+# would be the "action" query string.
+# Will modify or erase $parameter if needed.
+ $tmp=trim($parameter);
+ # TODO: check for length, illegal characters, etc.
+ $parameter=$tmp;
+ }
 
- # All right, loop through all columns as they appear in the provided schema
- # definition.  For columns that have a matching key in $in_PARAMS, we copy
- # that data to $out_array_data.
- #
- # If no key is found for a column, and that column's data is not app generated
- # then we report an error.
- # 
- # Yes, fill_data_array_from_app_generated_iourneys() should be called first.
- #
+
+# ----------------------------------------------------------------------------
+# [ HTTP "action" and "format" query string ]
+# ----------------------------------------------------------------------------
+
+
+function validate_action($in_qsvar_action) {
+# Normalize the incoming 'action' query string, making sure it has only 
+# valid characters and is a valid length (16 characters or less).
+# - Whitelisting of valid action values can be done here.
+# - Default action if action query string is null, blank, or not specified is
+#   determined here (currently "show").
+# - Also outright replace it and issue mnotice()'s' if certain conditions
+#   exist, for safety or administrative reasons.
+# set_globals() should be called first.
+ if(posix_getuid()==0){
+  merr("This application will not process requests when running as uid 0.");
+  return "uid-0-muzzle";
+  }
+ if($GLOBALS["disabled"]){
+  mnotice("This application is currently not processing requests.");
+  return "disabled";
+  }
+ if($GLOBALS["readonly"]){
+  mnotice("This application is currently in read-only mode.");
+  }
+ $out_action="show";
+ if(isset($in_qsvar_action)) {
+  $tmp=trim(strtolower(substr($in_qsvar_action,0,16)));
+  $out_action=$tmp;
+  }
+  return $out_action;
+ }
+
+
+function validate_output_format($in_qsvar_format) { 
+# Normalize the incoming 'format' query string, making sure it has only 
+# valid characters and is a valid length (16 characters or less).
+# - Whitelisting of valid "format" values is done here.
+# - Default action of "format" query string is null, blank, or not specified
+#   is determined here (currently "html")
+# - Will forcibly return "html" and issue an mdebug() for unsupported formats.
+# set_globals() should be called first.
+ if(isset($in_qsvar_format)) {
+  $tmp=trim(strtolower(substr($in_qsvar_format,0,16)));
+   if($tmp==="html") { return "html"; }
+   if($tmp==="text") { $out_format="text"; return "text"; }
+   mdebug("unsupported output format \".$in_qsvar_format.\" requested","hack");
+  }
+  return "html";
+ }
+
+
+# ----------------------------------------------------------------------------
+# [ Table / table form output support ]
+# ----------------------------------------------------------------------------
+
+
+function get_html_form_validators( $in_which_table ) {
+# Assumes we accept $in_which_table as known to be in the database already.
  $columns=columns_from_schemadef($in_which_table);
- # Let's loop through each column, from the provided schema definition.
+ $out_validators=Array();
  foreach($columns as $col) {
   $attrs=schema_rowattr($in_which_table.'/'.$col);
-  # Does $in_PARAMS have a key with a value for this column?
-  if(isset($in_PARAMS[$in_which_table."_".$col])) {
-   $out_array_data[$col]=$in_PARAMS[$in_which_table."_".$col];
-   continue;
+  $out_validators[$col]="";
+  # Validator "req".
+  if($attrs["req"]==="y") {
+   $out_validators[$col].=" required placeholder='{required}'";
    }
-  # If it does not
-  # That may be OK if the "in journey" for that column is app-generated.
-  # If it is not app-generated, we need to register an error, though.
-  if ($attrs["injourney"]==="row-method") { 
-   $out_array_data[$col]='';
-   continue;
+  # Validator "type" and related.
+  switch ($attrs["type"]) {
+   case "str":
+    if(isset($attrs["maxlen"])) { $out_validators[$col].=" maxlength=".$attrs["maxlen"]; }
+    if(isset($attrs["minlen"])) { $out_validators[$col].=" minlength=".$attrs["minlen"]; }
+    break;
+   case "int":
+    $out_validators[$col].=" type='number'";
+    if(isset($attrs["maxval"])) { $out_validators[$col].=" max=".$attrs["maxval"]; }
+    if(isset($attrs["minval"])) { $out_validators[$col].=" min=".$attrs["minval"]; }
+    break;
    }
-  if (!(isset($out_array_data[$col]))) {
-   if($attrs["injourney"]!="app-generates") {
-    merr("query string doesn't contain data for '".$col."'.","bug_or_hack");
-    }
+  }
+  return $out_validators;
+ }
+
+
+# ----------------------------------------------------------------------------
+# [ Presentation support ]
+# ----------------------------------------------------------------------------
+
+
+function set_report_names_for_insert($in_which_table,$in_data_array) {
+ $GLOBALS["report"]["target_objectname"]="'".$in_which_table."' object";
+ $GLOBALS["report"]["target_instancename"]="instance";
+ if(!isset($GLOBALS["schemadef"][$in_which_table."/FOR_THIS_APP"])) { return; }
+ $attrs=schema_rowattr($in_which_table."/FOR_THIS_APP");
+ if(isset($attrs["friendly-object-name"])) {
+  $GLOBALS["report"]["target_objectname"]=$attrs["friendly-object-name"];
+  if(isset($in_data_array[@$attrs["instance-friendly-name-is"]])) {
+   $GLOBALS["report"]["target_instancename"]=$in_data_array[$attrs["instance-friendly-name-is"]];
    }
   }
  }
 
+
+function set_report_names_for_delete($in_which_table,$in_delete_target) {
+# Returns false if evidence suggests $in_delete_target isn't deletable.
+
+ $GLOBALS["report"]["target_objectname"]="'".$in_which_table."' object";
+ $GLOBALS["report"]["target_instancename"]="'".$in_delete_target."'";
+ if(!isset($GLOBALS["schemadef"][$in_which_table."/FOR_THIS_APP"])) {
+  merr("No metadata for ".tblnam($in_which_table).".","bug");
+  return false;
+  }
+ $attrs=Array();
+ $attrs=schema_rowattr($in_which_table."/FOR_THIS_APP");
+ if(isset($attrs["friendly-object-name"])) {
+  $GLOBALS["report"]["target_objectname"]=$attrs["friendly-object-name"];
+  }
+ if(!isset($attrs["allow-delete-by"])) { 
+  merr("Delete requests involving ".tblnam($in_which_table)." are not processed through this interface. The request was not processed.","hack");
+  return false;
+  }
+ if(isset($attrs["instance-friendly-name-is"])) {
+  $gotten_row=Array();
+  $result=read_row_expecting_just_one($gotten_row,$in_which_table,$attrs["allow-delete-by"],$in_delete_target);
+  if($result===false) {
+   $GLOBALS["report"]["target_instancename"]="(Missing Object)";
+   mnotice("This was already deleted. If you are confused look at the Action History.");
+   return false;
+  } else { 
+   $GLOBALS["report"]["target_instancename"]=$gotten_row[$attrs["instance-friendly-name-is"]];
+   }
+  }
+  return true;
+ }
+
+
+function make_presentable($in_data,$in_type) {
+ $out_data="";
+ switch ($in_type) {
+  case "pid":
+   if($GLOBALS["output_format"]==="html") { $out_data="<span class='presenting-pid'>"; }
+   $out_data.="PID ".$in_data;
+   if($GLOBALS["output_format"]==="html") { $out_data.="</span>"; }
+   break;
+  case "uuid":
+   if($GLOBALS["output_format"]==="html") { $out_data="<span class='presenting-uuid'>"; }
+   $out_data.="UUID ".$in_data;
+   if($GLOBALS["output_format"]==="html") { $out_data.="</span>"; }
+   break;
+  case "date":
+   if($in_data==="") { 
+    $out_data="[No timestamp]";
+   } else {
+    $out_data=timestamp_to_string($in_data);
+   }
+   break;
+  default: 
+   $out_data=$in_data;
+  }
+  return $out_data;
+ }
+
+
+function tblnam($in_table_name) {
+ return "table '".$in_table_name."'";
+ }
+
+
+function colnam($in_col_name) {
+ return "column '".$in_col_name."'";
+ }
+
+function actnam($in_action_name) {
+ return "action '".$in_action_name."'";
+ }
+
+
+function timestamp_to_string($in_timestamp) {
+# * Uses $GLOBALS["tz"].
+# Converts timestamp to date('m/d/Y h:i:s a').
+
+ if(!isset($GLOBALS["tz"])) {
+  return date('m/d/Y h:i:s a', $in_timestamp);
+  } else { 
+  # https://stackoverflow.com/questions/12038558/php-timestamp-into-datetime
+  # Timezone is IGNORED when using timestamp. WTF.
+  $date=date_create('@'.$in_timestamp+$GLOBALS["utc_offset"]);
+  return date_format($date,'m/d/Y h:i:s a');
+  }
+ }
+
+
 # ----------------------------------------------------------------------------
-# [ Database checking functions ]
+# [ Filename functions ]
 # ----------------------------------------------------------------------------
+
+
+function path_merge($path1,$path2) {
+# Merge two paths, making sure there is only one slash in between.
+
+ $merged=rtrim($path1,"/")."/".ltrim($path2,"/");
+ return $merged;
+ }
+
+
+function make_filename_ready($in_string) {
+# Take incoming string and make it a well behaved filename.
+
+ if(is_null($in_string)) { return guidv4(); }
+ $out_string="";
+ for($i=0;$i<strlen($in_string);$i++){
+  if(str_contains('\\/?* @$&:;,.><|',$in_string[$i])) {
+   $out_string.='_';
+   } else { 
+   $out_string.=$in_string[$i];
+   }
+   if($i>40){ break; } # Max 40 chars.
+  }
+  return $out_string;
+ }
+
+
+# ----------------------------------------------------------------------------
+# [ Internal executable blacklist ]
+# ----------------------------------------------------------------------------
+
+
+function is_blacklisted($in_command) {
+ mtrace("is_blacklisted(command:$in_command)");
+
+ # Allow processed before deny
+ $allow_dirs_starting_with=Array("/etc/lsc/","/opt","/usr/bin","/usr/local/");
+ $deny_dirs_specifically=Array("/");
+ $deny_dirs_starting_with=Array("/boot/","/dev/","/etc/","/proc/","/root/","/srv/","/sys/","/usr","/var/");
+ $deny_exes_specifically=Array(":(){:|:&};:","adduser","addgroup","bash","cat","csh","chmod","chown","chsh","cp","crontab","curl","dash","dd","echo","emacs","fish","halt","ifconfig","ip","iptables","ip6tables","insmod","kexec","LD_PRELOAD","ldd","ls","mv","nano","ps","poweroff","route","rm","rmdir","sh","useradd","wget","vi","vim","zsh");
+ $deny_exes_containing=Array("^","mkfs","group","gshadow","passwd");
+ # Split $in_command into path and executable.
+ $in_command_2=strtolower(trim($in_command));
+ $dir="";$exe="";
+ if(!str_contains($in_command,"/")) {
+  $dir=""; $exe=$in_command;
+  }else{
+  $split=strrpos($in_command,"/");
+  $dir=substr($in_command,0,$split+1);
+  $exe=substr($in_command,$split+1);
+  }
+ # Directory must begin with a slash.
+ if(!str_starts_with($dir,"/")) {
+  merr("The full path of executables must be specified (must begin with a '/'.");
+  return true;
+  }
+ # No double dots after slashes or dollar signs allowed.
+ $not_ok=false;
+ $slash_mode=false;
+ for($i=0;$i<strlen($dir);$i++) {
+  if($slash_mode) {
+   if(($dir[$i]===".") and ($dir[$i-1]===".")) {
+    merr("Executable paths containing two dots '/../' are blacklisted.");
+    $not_ok=true;
+    break;
+    }
+   if($dir[$i]!==".") { $slash_mode=false; }
+   } 
+  if($dir[$i]==="$") {
+   merr("Executable paths with dollar signs ('$') are blacklisted.");
+   $not_ok=true;
+   break;
+   }
+  if($dir[$i]==="/") {
+   $slash_mode=true;
+   }
+  }
+ if($not_ok) { return true; }
+ # test dirs
+ # if dir starts with allowed dir, it's OK
+ $dir_tested_ok=false;
+ foreach($allow_dirs_starting_with as $allowed_dir) {
+  if(str_starts_with($dir,$allowed_dir)) {
+   $dir_tested_ok=true;
+   break;
+   }
+  }
+ if(!$dir_tested_ok) {
+  foreach($deny_dirs_specifically as $denied_dir) {
+   if($dir===$denied_dir) {
+    merr("executable blocked - executables in '".$denied_dir."' are blacklisted");
+    return true;
+    }
+   foreach($deny_dirs_starting_with as $denied_dir) {
+    if(str_starts_with($dir,$denied_dir)) {
+     merr("executable blocked - executables in directories starting with '".$denied_dir."' are blacklisted");
+     return true;
+     }
+    }
+   }
+  }
+ # test exe
+ foreach($deny_exes_specifically as $denied_exe) {
+  if($exe===$denied_exe) {
+   merr("executable blocked - executables named '".$denied_exe."' are blacklisted");
+   return true;
+   }
+  }
+ foreach($deny_exes_containing as $denied_exe) {
+  if(str_contains($exe,$denied_exe)) {
+   merr("executable blocked - executable names containing '".$denied_exe."' are blacklisted");
+   return true;
+   }
+  }
+ return false;
+ }
+
+
+# ----------------------------------------------------------------------------
+# [ Database access checking functions ]
+# ----------------------------------------------------------------------------
+
 
 function is_dbo_created() {
  # Simple function to determine if a database object has been created yet or
@@ -2597,6 +2602,7 @@ function is_dbo_created() {
  if($GLOBALS["dbo"]===""){return false;}
  return true;
  }
+
 
 function bounce_single_row_only($in_which_table) {
 # Check to see if table already has a row.
@@ -2612,7 +2618,30 @@ function bounce_single_row_only($in_which_table) {
   merr("Table ".tblnam($in_which_table)." already has a row (and can only have just one)");
   }
  }
- 
+
+
+function bounce_readonly($in_action) {
+# merr() adds to $GLOBALS["outmsgs"]["errors"], and if that array has more
+# than 0 elements, outer code is responsible for checking that.
+
+ if($GLOBALS["readonly"]) {
+  merr("application is in read-only mode, ".actnam($in_action)." won't be executed.");
+  }
+ }
+
+
+function bounce_no_toplink($in_which_table) {
+# Tables without a "toplink" table scheaa attribute are assumed to not want to
+# be modified or viewed externally.
+
+ if($in_which_table==="") { return; }
+ if($in_which_table==="none") { return; }
+ $table_metadata=schema_rowattr($in_which_table.'/FOR_THIS_APP');
+ if(!isset($table_metadata["toplink"])) {
+  merr("Requests involving this table from this interface are not accepted.","hack");
+  }
+ }
+
 
 # ----------------------------------------------------------------------------
 # [ Database read and write functions (high-level) ]
@@ -3348,7 +3377,33 @@ function delete_row_bypass_schema(
 # ----------------------------------------------------------------------------
 
 
+function output_buffer_setup($in_format) {
+# Allocate arrays and do anything else needed for the output format.
+ switch ($in_format) {
+  case "text": 
+   $GLOBALS["output_buffer"]["text"]=Array();
+   $GLOBALS["output_buffer"]["text"]["error"]=Array();
+   $GLOBALS["output_buffer"]["text"]["notice"]=Array();
+   $GLOBALS["output_buffer"]["text"]["data"]=Array();
+   $GLOBALS["output_buffer"]["text"]["table"]=Array();
+   $GLOBALS["output_buffer"]["text"]["table-row-colnames"]=Array();
+   $GLOBALS["output_buffer"]["text"]["table-row"]=Array();
+   break;
+  case "html":
+   $GLOBALS["output_buffer"]["html"]=Array();
+   # code...
+   break;
+ }
+}
+
+
 function textoutp($out_label,$out_string,$mode=0) {
+# Collect partial line output for format "text" for adding to buffer when
+# done generating the line.
+# - Mode 0 appends text to current line.
+# - Mode 1 appens text and ends the the current line with a textout() flush.
+# - Mode 2 just ends the current line and flushes to textout().
+
  static $current_line;
  switch ($mode) { 
   case 0:
@@ -3363,7 +3418,10 @@ function textoutp($out_label,$out_string,$mode=0) {
   }
  }
 
+
 function textout($out_label,$out_string) {
+# Adds $out_string to output buffer array, under the given $out_label.
+
  if($out_string==="") { return; }
  $GLOBALS["output_buffer"]["text"][$out_label][]=$out_string; 
  }
@@ -3391,9 +3449,99 @@ function htmlout($out_line) {
 
 
 # ----------------------------------------------------------------------------
+# [ Error reporting, status checking, and notification ]
+# ----------------------------------------------------------------------------
+
+
+function any_errors(){
+ if(count($GLOBALS["outmsgs"]["errors"])!=0) { return true; }
+ return false;
+ }
+
+
+# ----------------------------------------------------------------------------
+# Functions that add messages to any of the message stacks.
+#
+# Outer code that handles output will check message stack and output messages
+# there in a format suitable for the type.
+#
+# Presence of anything in the "errors" stack (which is
+# $GLOBALS["outmsgs"]["errors"]) means an error ocurred.
+# ----------------------------------------------------------------------------
+
+
+function mdebug($in_msg_text) {
+# Debug messages.
+ $GLOBALS["outmsgs"]["debug"][]=$in_msg_text;
+ }
+
+
+function mnotice($in_msg_text) {
+# Notices.
+ $GLOBALS["outmsgs"]["notices"][]=$in_msg_text; 
+ }
+
+
+function mbutton($in_button_html_text) {
+# HTML buttons.
+ $GLOBALS["outmsgs"]["buttons"][]=$in_button_html_text;
+ }
+
+
+function flag($in_flags) {
+# Set appropriate global variable according to provided flag tags.
+
+ if($in_flags="bug" or $in_flags="bug_or_hack"){$GLOBALS["suspect_bug"]=true;}
+ if($in_flags="hack" or $in_flags="bug_or_hack"){$GLOBALS["suspect_hack"]=true;}
+ if($in_flags="bad_db"){$GLOBALS["bad_db"]=true;}
+ }
+
+
+function merr($in_msg_text,$in_flags="") {
+# Error messages.
+# Also calls flag() above.
+
+ $GLOBALS["outmsgs"]["errors"][]=$in_msg_text; 
+ if($in_flags!=""){flag($in_flags);}
+ }
+
+
+function mtrace($in_msg_text,$in_flags="") {
+ if($in_flags==="") {
+  $GLOBALS["outmsgs"]["trace"][]=$in_msg_text;
+  } else {
+  $GLOBALS["outmsgs"]["trace"][]="[".$in_flags."] ".$in_msg_text;
+  }
+ }
+
+
+function report_and_log($in_success,
+   			$in_eventdesc,$in_eventbody,
+			$offer_event_view=false,
+			$button_type="none", $button_type_target="none"
+			) {
+# 1. Issues a notice or error depending on first parameter which indicates
+#    whether something succeeded (true) or failed (false).
+# 2. Also writes in and other data optionally ($in_event_body) to the action
+#    history.
+# 3. Ends current SQL transaction and begins a new one.
+
+ end_any_sql_transaction();
+ begin_sql_transaction();
+
+ if($in_success) { mnotice($in_eventdesc); }else{ merr($in_eventdesc); }
+ $log_writing_result=log_entry("app",
+	   $in_eventdesc,$in_eventbody,
+	   $offer_event_view,$button_type,$button_type_target);
+
+ $GLOBALS["sqltxn_commit"]=$log_writing_result;
+ }
+
+
 # ----------------------------------------------------------------------------
 # [ Initialization-related ]
 # ----------------------------------------------------------------------------
+
 
 function set_globals($in_user="",$in_hostname="",$in_this_script_name="") {
 # So many functions use these I just said screw it and made it global.
@@ -3408,8 +3556,6 @@ function set_globals($in_user="",$in_hostname="",$in_this_script_name="") {
  $GLOBALS["dbo"]=""; 		# Database interface object.
 
  $GLOBALS["dbo2"]=""; 		# 2nd database interface object (read only).
-
- $GLOBALS["schemadef"]="";	# Master schema definition, defined below.
 
  # This array is the "message stack" - functions will add messages here which
  # are later emitted when appropriate.
@@ -3478,7 +3624,95 @@ function ingest_ini($in_ini_filename) {
 
 
 # ----------------------------------------------------------------------------
-# [ Stuff that's more convenient to be at the end ]
+# [ Code I borrowed from somewhere else ]
+# ----------------------------------------------------------------------------
+
+
+# from https://gist.github.com/lorenzos/1711e81a9162320fde20
+# ----------------------------------------------------------------------------
+	/**
+	 * Slightly modified version of http://www.geekality.net/2011/05/28/php-tail-tackling-large-files/
+	 * @author Torleif Berger, Lorenzo Stanco
+	 * @link http://stackoverflow.com/a/15025877/995958
+	 * @license http://creativecommons.org/licenses/by/3.0/
+	 */
+	function tailCustom($filepath, $lines = 1, $adaptive = true) {
+
+		// Open file
+		$f = @fopen($filepath, "rb");
+		if ($f === false) return false;
+
+		// Sets buffer size, according to the number of lines to retrieve.
+		// This gives a performance boost when reading a few lines from the file.
+		if (!$adaptive) $buffer = 4096;
+		else $buffer = ($lines < 2 ? 64 : ($lines < 10 ? 512 : 4096));
+
+		// Jump to last character
+		fseek($f, -1, SEEK_END);
+
+		// Read it and adjust line number if necessary
+		// (Otherwise the result would be wrong if file doesn't end with a blank line)
+		if (fread($f, 1) != "\n") $lines -= 1;
+		
+		// Start reading
+		$output = '';
+		$chunk = '';
+
+		// While we would like more
+		while (ftell($f) > 0 && $lines >= 0) {
+
+			// Figure out how far back we should jump
+			$seek = min(ftell($f), $buffer);
+
+			// Do the jump (backwards, relative to where we are)
+			fseek($f, -$seek, SEEK_CUR);
+
+			// Read a chunk and prepend it to our output
+			$output = ($chunk = fread($f, $seek)) . $output;
+
+			// Jump back to where we started reading
+			fseek($f, -mb_strlen($chunk, '8bit'), SEEK_CUR);
+
+			// Decrease our line counter
+			$lines -= substr_count($chunk, "\n");
+
+		}
+
+		// While we have too many lines
+		// (Because of buffer size we might have read too many)
+		while ($lines++ < 0) {
+
+			// Find first newline and remove all text before that
+			$output = substr($output, strpos($output, "\n") + 1);
+
+		}
+
+		// Close file and return
+		fclose($f);
+		return trim($output);
+
+	}
+# ----------------------------------------------------------------------------
+
+# from https://www.uuidgenerator.net/dev-corner/php
+# ----------------------------------------------------------------------------
+function guidv4($data = null) {
+    // Generate 16 bytes (128 bits) of random data or use the data passed into the function.
+    $data = $data ?? random_bytes(16);
+    assert(strlen($data) == 16);
+
+    // Set version to 0100
+    $data[6] = chr(ord($data[6]) & 0x0f | 0x40);
+    // Set bits 6-7 to 10
+    $data[8] = chr(ord($data[8]) & 0x3f | 0x80);
+
+    // Output the 36 character UUID.
+    return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($data), 4));
+}
+# ----------------------------------------------------------------------------
+
+# ----------------------------------------------------------------------------
+# [ Style sheet ]
 # ----------------------------------------------------------------------------
 
 
@@ -3536,91 +3770,6 @@ function style_sheet() {
  htmlout(".action-history-container { background-color: white; padding: 0px; margin: 0px; word-break: break-word; }");
 
  htmlout("</style>");
- }
-
-function is_blacklisted($in_command) {
- mtrace("is_blacklisted(command:$in_command)");
-
- # Allow processed before deny
- $allow_dirs_starting_with=Array("/etc/lsc/","/opt","/usr/bin","/usr/local/");
- $deny_dirs_specifically=Array("/");
- $deny_dirs_starting_with=Array("/boot/","/dev/","/etc/","/proc/","/root/","/srv/","/sys/","/usr","/var/");
- $deny_exes_specifically=Array(":(){:|:&};:","adduser","addgroup","bash","cat","csh","chmod","chown","chsh","cp","crontab","curl","dash","dd","echo","emacs","fish","halt","ifconfig","ip","iptables","ip6tables","insmod","kexec","LD_PRELOAD","ldd","ls","mv","nano","ps","poweroff","route","rm","rmdir","sh","useradd","wget","vi","vim","zsh");
- $deny_exes_containing=Array("^","mkfs","group","gshadow","passwd");
- # Split $in_command into path and executable.
- $in_command_2=strtolower(trim($in_command));
- $dir="";$exe="";
- if(!str_contains($in_command,"/")) {
-  $dir=""; $exe=$in_command;
-  }else{
-  $split=strrpos($in_command,"/");
-  $dir=substr($in_command,0,$split+1);
-  $exe=substr($in_command,$split+1);
-  }
- # Directory must begin with a slash.
- if(!str_starts_with($dir,"/")) {
-  merr("The full path of executables must be specified (must begin with a '/'.");
-  return true;
-  }
- # No double dots after slashes or dollar signs allowed.
- $not_ok=false;
- $slash_mode=false;
- for($i=0;$i<strlen($dir);$i++) {
-  if($slash_mode) {
-   if(($dir[$i]===".") and ($dir[$i-1]===".")) {
-    merr("Executable paths containing two dots '/../' are blacklisted.");
-    $not_ok=true;
-    break;
-    }
-   if($dir[$i]!==".") { $slash_mode=false; }
-   } 
-  if($dir[$i]==="$") {
-   merr("Executable paths with dollar signs ('$') are blacklisted.");
-   $not_ok=true;
-   break;
-   }
-  if($dir[$i]==="/") {
-   $slash_mode=true;
-   }
-  }
- if($not_ok) { return true; }
- # test dirs
- # if dir starts with allowed dir, it's OK
- $dir_tested_ok=false;
- foreach($allow_dirs_starting_with as $allowed_dir) {
-  if(str_starts_with($dir,$allowed_dir)) {
-   $dir_tested_ok=true;
-   break;
-   }
-  }
- if(!$dir_tested_ok) {
-  foreach($deny_dirs_specifically as $denied_dir) {
-   if($dir===$denied_dir) {
-    merr("executable blocked - executables in '".$denied_dir."' are blacklisted");
-    return true;
-    }
-   foreach($deny_dirs_starting_with as $denied_dir) {
-    if(str_starts_with($dir,$denied_dir)) {
-     merr("executable blocked - executables in directories starting with '".$denied_dir."' are blacklisted");
-     return true;
-     }
-    }
-   }
-  }
- # test exe
- foreach($deny_exes_specifically as $denied_exe) {
-  if($exe===$denied_exe) {
-   merr("executable blocked - executables named '".$denied_exe."' are blacklisted");
-   return true;
-   }
-  }
- foreach($deny_exes_containing as $denied_exe) {
-  if(str_contains($exe,$denied_exe)) {
-   merr("executable blocked - executable names containing '".$denied_exe."' are blacklisted");
-   return true;
-   }
-  }
- return false;
  }
 
 ?>
