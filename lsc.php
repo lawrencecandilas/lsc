@@ -2,617 +2,25 @@
 error_reporting(E_ALL);
 ini_set('display_errors','On');
 
+# This is lsc.php
+# Developed and tested under Debian Linux, PHP v8.2, php-sqlite3 required
+# https://github.com/lawrencecandilas/lsc.php
+# Copyright 2024 Lawrence Candilas | Released under GPLv3
 # ----------------------------------------------------------------------------
-# lsc.php
-# ----------------------------------------------------------------------------
-
-# === MASTER SCHEMA DEFINITION
-# - Defines tables and columns.
-# - Virtual column name "FOR_THIS_APP" defines some things for the entire
-#   table.
-# - Data for validation and methods are included as well as data constraints.
-$GLOBALS["schemadef"]=Array(
- 'conf/FOR_THIS_APP'	    	=>  'title:Configuration'
-		            	    	   .'/new-form-title:			    Configuration'
-		            	    	   .'/allow-delete-by:			    uuid'
-		            	    	   .'/single-row-only'
-		            	    	   .'/single-row-only-empty-message:No configuration currently defined'
-		            	    	   .'/friendly-object-name:		    configuration'
-			                 	   .'/instance-friendly-name-is:	uuid'
-			        	           .'/toplink:				        configure'
-			                	   ,
- 'conf/uuid'		        	=>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
- 'conf/basefilepath'	    	=>  'req:y/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localdir/form-label:Base File Path/default-value-from-ini:homedir/present-width:full-width',
- 'conf/stdoutfilepath'	    	=>  'req:y/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localdir/form-label:stdout File Path/default-value-from-ini:stdoutdir/present-width:full-width',
- # ---------------------------------------------------------------------------
- 'rpmap/FOR_THIS_APP'	    	=>  'title:Locations (Port and Prefix)'
-			                  	   .'/new-form-title:			    Define A Port and Prefix Combination'
-		                		   .'/allow-delete-by:		    	uuid'
-		                		   .'/row-must-exist-in:	    	conf'
-	            	    		   .'/must-exist-in-fails-message:	You can&apos;t define a location until you create a configuration.'
-	            		    	   .'/friendly-object-name:		    location'
-	            		    	   .'/instance-friendly-name-is:	number'
-	            	    		   .'/toplink:				        locations'
-	            			       ,
- 'rpmap/pointer_to_conf'	    =>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Under Configuration/dont-show'.
-				                    '/is-pointer-to:conf/pointer-links-by:uuid/shown-by:basefilepath',
- 'rpmap/uuid'			        =>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
- 'rpmap/number'		        	=>  'req:y/type:int/data:port/minval:1024/maxval:  65535/injourney:user-enters-text-for-number/form-label:TCP&#47;IP Port Number/must-be-unique',
- 'rpmap/urlprefix'	         	=>  'req:y/type:str/data:url /minlen:   1/maxlen:   1024/injourney:user-enters-text-for-urlprefix/form-label:URL Prefix',
- # ---------------------------------------------------------------------------
- 'defined/FOR_THIS_APP'		    =>  'title:Services'
-		            	    	   .'/new-form-title:			    Define A Service'
-		            		       .'/allow-delete-by:			    uuid'
-	            		    	   .'/row-must-exist-in:	    	conf'
-		            	    	   .'/must-exist-in-fails-message:	You can&apos;t create a service until you create a configuration.'
-		            		       .'/friendly-object-name:		    service'
-		            		       .'/instance-friendly-name-is:	name'
-		            		       .'/toplink:				        services'
-		            		       ,
- 'defined/pointer_to_conf'	    =>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Under Configuration/dont-show'.
-			            	        '/is-pointer-to:conf/pointer-links-by:uuid/shown-by:basefilepath',
- 'defined/uuid'		    	    =>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
- 'defined/name'		    	    =>  'req:y/type:str/data:name/minlen:   1/maxlen:     50/injourney:user-enters-text/form-label:Service Name',
- 'defined/description'	    	=>  'req:n/type:str/data:name/minlen:   0/maxlen:   4000/injourney:user-enters-text/form-label:Service Description',
- 'defined/command'	    	    =>  'req:y/type:str/data:cmd /minlen:   1/maxlen:    500/injourney:user-selects-from-ini-list/form-label:Command/present-width:full-width'.
-				                    '/ini-list-section:whitelist/ini-list-array:bin',
- 'defined/arguments'		    =>  'req:n/type:str/data:name/minlen:   0/maxlen:   4000/injourney:user-enters-text/form-label:Command Arguments (With Substitution Points)/present-width:full-width',
- 'defined/defaultfile'	    	=>  'req:n/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text/form-label:Default File (blank for none) {LOCALFILE}'.
-				                    '/provides-defaults/gives-default-for-table:running/gives-default-for-column:localfile',
- 'defined/defaultrpmap'		    =>  'req:n/type:int/data:port/minval:1024/maxval:  65535/injourney:user-selects-from-list-in-other-table/form-label:Port And URL Prefix Combo'.
-			                	    '/provides-defaults/gives-default-for-table:running/gives-default-for-column:rpmap'.
-			            	        '/is-pointer-to:rpmap/pointer-links-by:number/shown-by:number,urlprefix',
- # ---------------------------------------------------------------------------
- 'running/FOR_THIS_APP'		    =>  'title:Processes (Started Services)'
-				                   .'/new-form-title:		    	Start A Service'
-				                   .'/table-method:check,Check All Processes'
-				                   .'/each-row-method:stdout,View output,uuid;stop,Stop Process,uuid;check,Check If Still Running,uuid'
-				                   .'/row-must-exist-in:		        defined'
-				                   .'/must-exist-in-fails-message:	No defined services to start.'
-				                   .'/defaults-provided-by:	    	defined'
-				                   .'/defaults-in-provider-keyed-by:	uuid'
-				                   .'/defaults-here-keyed-by:		pointer_to_defined'
-				                   .'/friendly-object-name:	    	process'
-				                   .'/instance-friendly-name-is: 	pid'
-				                   .'/backref-by:		        	uuid'
-				                   .'/toplink:			        	processes'
-				                   ,
- 'running/uuid'			        =>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
- 'running/pointer_to_defined'   =>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Instance Of'.
-			            	        '/is-pointer-to:defined/pointer-links-by:uuid/shown-by:name'.
-				                    '/display-using-other-table/display-sql-SELECT:name/display-sql-FROM:defined/display-sql-WHERE:uuid/display-sql-IS:pointer_to_defined',
- 'running/pid'		    	    =>  'req:y/type:int/data:pid /minval:   2/maxval:4194304/injourney:app-generates/form-label:Process ID',
- 'running/localfile'		    =>  'req:n/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localfile/form-label:Local File {LOCALFILE}/present-width:full-width',
- 'running/rpmap'		        =>  'req:n/type:int/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Location (Port and URL Prefix)/must-be-unique'.
-	   			                    '/is-pointer-to:rpmap/pointer-links-by:number/shown-by:number,urlprefix'.
-				                    '/display-using-other-table/display-sql-SELECT:number,urlprefix/display-sql-FROM:rpmap/display-sql-WHERE:number/display-sql-IS:rpmap',
- 'running/lastchecked'	    	=>  'req:n/type:str/data:date/minlen:   0/maxlen:       0/injourney:row-method/form-label:Last Checked',
- # ---------------------------------------------------------------------------
- 'maint/FOR_THIS_APP'	    	=>  'title:Maintenance Command Requests'
-				                   .'/new-form-title:			    Maintenance Request'
-			                	   .'/allow-delete-by:			    uuid'
-			                	   .'/single-row-only'
-		            	    	   .'/single-row-only-empty-message:No active maintenance request.'
-			                	   .'/friendly-object-name:		    maintenance request'
-			                	   .'/instance-friendly-name-is:	request'
-		            	    	   .'/each-row-method:execute,Execute maintenance request,uuid'
-		            	    	   .'/toplink:				        MR'
-			                	   ,
- 'maint/uuid'	       	    	=>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:MRN',
- 'maint/request'	        	=>  'req:y/type:str/data:name/minlen:   1/maxlen:      64/injourney:user-selects-from-this-list/form-label:Action/this-list:deldb=Delete Database',
- 'maint/mkey'		         	=>  'req:y/type:str/data:name/minlen:  16/maxlen:    256/injourney:user-enters-text/form-label:Enter A Confirmation Password'.
-				                    '/is-confirmation-key-for:execute/confirmation-placeholder:Enter Confirmation Password',
- # ---------------------------------------------------------------------------
- 'trashcan/FOR_THIS_APP'	    =>  'title:Recycle Bin'
-			                	   .'/allow-delete-by:			    uuid'
-			                	   .'/each-row-method:restart,Restart This Process,uuid'
-			                	   .'/friendly-object-name:		    previous process'
-			                	   .'/instance-friendly-name-is:	previous process'
-			            	       .'/erase-upon-clear-logs'
-			            	       ,
- 'trashcan/uuid'	    	    =>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
- 'trashcan/pointer_to_defined'	=>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Instance Of'.
-				                    '/is-pointer-to:defined/pointer-links-by:uuid/shown-by:name'.
-				                    '/display-using-other-table/display-sql-SELECT:name/display-sql-FROM:defined/display-sql-WHERE:uuid/display-sql-IS:pointer_to_defined',
- 'trashcan/localfile'	    	=>  'req:n/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localfile/form-label:Local File {LOCALFILE}',
- 'trashcan/rpmap'		        =>  'req:n/type:int/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Port And URL Prefix Combo'.
-	   			                    '/is-pointer-to:rpmap/pointer-links-by:number/shown-by:number,urlprefix'.
-				                    '/display-using-other-table/display-sql-SELECT:number,urlprefix/display-sql-FROM:rpmap/display-sql-WHERE:number/display-sql-IS:rpmap',
- );
-
-# ----------------------------------------------------------------------------
-# == = = = = = = = = = = = = = = CALLABLES  = = = = = = = = = = = = = = = = ==
-# ----------------------------------------------------------------------------
-
-# Section Index:
-# - HOMEPAGE()
-# - GENERATOR_xxx()
-# - ROWMETHOD_xxx()
-# - BUTTONHTML_xxx()
-# - BUTTONFALLOFF_xxx()
-# - VALIDATOR_xxx()
-
-function HOMEPAGE() {
-# Called via null_request() when the action is "show", the table is "none.",
-# and $GLOBALS["output_format"] is "html".
-# Uses $GLOBALS["username"].
-
- # Basically, a friendly, standard introduction.
- htmlout("<p>This is <span class='tt'>lsc</span> - Lawrence's Service Controller.</p>");
- htmlout("<p><span class='tt'>lsc</span> allows you to define <i>services</i>, and once defined, start and stop them.</p>");
- htmlout("<p>A service is a command that takes a filename, URL prefix, and/or a port number as part of its arguments.  These types of commands typically serve files over your network or the Internet and may be something you wish to conveniently start and stop remotely.</p>");
- htmlout("<p>If this is a new instance, you will first need to whitelist your desired executables in <code>lsc</code>'s .INI file (<span class='tt'>/etc/lsc/".$GLOBALS["username"]."/lsc.ini</span>).  Then create a configuration.  Next, you'll want to define some locations, a service or two, and after that, you can start and stop them from this interface.</p>");
- htmlout("<p><span class='tt'>lsc</span> as shipped will not run as root, can only launch executables that are whitelisted, will not run setuid/setgid executables, and can only manage services it has started that are running under the same local user account as itself.  There is also an internal blacklist of executable names <span class='tt'>lsc</span> will refuse to run, such as <span class='tt'>/bin/rm</span>.</p>");
- }
-
-# ----------------------------------------------------------------------------
-# [ === GENERATOR functions ]
-# - When the user wants to create a new row, column data for that table can be
-#   supplied by the user, or generated by the app.
-# - For columns that are app generated, generators are called to supply the
-#   needed data.
-# - Generators may also make the app perform an action.
-# - If a generator returns false, it is assumed something went wrong and a new
-#   database row is not created.
-# - The value that the generator is giving back to be put in the database is
-#   in &$returned_value passed by reference.
-# (See function generate_app_value().)
+# Big Section Index:
+# - MAIN
+# - SUBROUTINES
+# - Master Schema Definition
+# - Callables
 #
-# GENERATOR_xxx parameters:
-# - &$returned_value: generator function needs to set this, this will be the
-#   value added in the column, IF the function returns true.
-# - $in_table: table containing row/column needing new value.
-# - $in_col: column needing new value.
-# - $in_array_col_attrs: column attributes from global schema definition.
-# - $in_PARAMS:
-# ----------------------------------------------------------------------------
-
-
-function GENERATOR_pid (
- &$returned_value, $in_table, $in_col, $in_array_col_attrs, $in_PARAMS, $in_ini
- ) {
- # Generating a pid = creating a new process.
- # https://stackoverflow.com/questions/9445815/how-to-background-a-process-via-proc-open-and-have-access-to-stdin
-
- # Resolve reference to defined process.
- $pdefined=$in_PARAMS["running_pointer_to_defined"];
- $rdefined=Array();
- if(!read_row_expecting_just_one($rdefined,"defined","uuid",$pdefined)) { return false; }
-
- # Defined process points to an rpmap.
- # Resolve reference to rpmap - needed to get port and urlprefix.
- $prpmap=$in_PARAMS["running_rpmap"];
- $rrpmap=Array();
- if(!read_row_expecting_just_one($rrpmap,"rpmap","number",$prpmap)) { return false; }
-
- # Defined process also points to a conf.
- # Resolve reference to conf - needed to get stdout path.
- $pconf=$rdefined["pointer_to_conf"];
- $rconf=Array();
- if(!read_row_expecting_just_one($rconf,"conf","uuid",$pconf)) { return false; }
-
- # Start building the command.  It begins with, well, the command.
- $cmd=$rdefined["command"];
-
- # Start building the arguments.
- $args="";
-
- # Doing that involves expanding substitution points in arguments.
- $nbrackets=0; $firstflag=false;
- $errorflag=false;
-
- $chopped=explode("{",$rdefined["arguments"]); # split stuff up based on {'s initially.
- foreach($chopped as $choppedmore) {
-  # stuff BEFORE the first { is stuff we want to keep as part of the command.
-  if(!$firstflag) { $firstflag=true; $args.=$choppedmore; continue; }
-  # Each substring should have a } somewhere in it, otherwise there is not one
-  # } for each {.
-  if(!str_contains($choppedmore,'}')) {
-   merr("Argument text is missing an ending '}'."); $errorflag=true;
-   }
-  # split the substring on the }.
-  # Stuff before the } is part of the substitutor. 
-  # Stuff after gets tacked on the command.
-  $to_bracket=explode('}',$choppedmore); $nbrackets++;
-  # Do the actual substitution.
-  switch (trim(strtoupper($to_bracket[0]))) {
-   case "LOCALFILE":	$args.=$in_PARAMS["running_localfile"]; break;
-   case "URLPREFIX":	$args.=$rrpmap["urlprefix"]; break;
-   case "PORT":		$args.=$in_PARAMS["running_rpmap"]; break;
-   case "";
-    merr("Argument text has a pair of brackets with nothing inbetween.");
-    $errorflag=true;
-    break;
-   default:
-    merr("Unknown substitutor '".$to_bracket[0]."'.");
-    $errorflag=true;
-   }
-  $args.=$to_bracket[1];
-  }
- # Any errors processing the substitutions, we exit with an error.
- if ($errorflag) { return false; }
- 
- # Check executable against blacklist.
- # Each time, every time. You never know.
- $tmp=explode(" ",$cmd);
- if(is_blacklisted($tmp[0])) { return false; }
- # Check executable suid/sgid bits.
- # Each time, every time. You never know.
- $mode=fileperms($tmp[0]);
- if(is_bool($mode)) {
-  report_and_log(false,"Unable to check executable permissions. Process was not started.","");
-  return false;
-  }
- if(($mode & 06000)!=0) {
-  report_and_log(false,"Executable has suid or sgid bit set. Process was not started.","");
-  return false;
-  }
-
- # This is a "backchannel" flag set by ROWMETHOD_restart_trashcan to indicate
- # we are actually restarting a process.
- # If we are doing that we want to say "restart" instead of "start".
- $re="";
- if(isset($in_PARAMS["restart"])) { $re="re"; }
-
- # Assemble stdoutpath (path from config, filename from service definition).
- $stdoutpath=path_merge(trim($rconf["stdoutfilepath"]),trim(make_filename_ready($rdefined["name"])."-stdout.txt"));
-
- # We might immediately "remove" the row (actually, not even create it) if the
- # launch is not successful.  So, we'll need these ...
- $removing=false; $removing_info="";
-
- # Ok, let's launch!
- $pidArr=Array();
- $exec_result=exec(sprintf("%s > %s 2>&1 & echo $!", trim($cmd." ".$args), $stdoutpath), $pidArr);
- # Result:
- if($exec_result==false) {
-  $removing=true; $removing_info=$rdefined["name"]." not ".$re."started (exec failed)";
-  }
- if(!(isset($pidArr[0]))) {
-  $removing=true; $removing_info=$rdefined["name"]." not ".$re."started (no PID returned from exec)";
-  }
- 
- # Make sure it doesn't die right away.
- sleep(2);
- if(!posix_getpgid($pidArr[0])) {
-  $removing=true; $removing_info=make_presentable($pidArr[0],"pid")." was started, but then died right away.";
-  }
-
- $GLOBALS["extra_goodies"].="<div class='stdout-top'>Last 50 lines of captured <tt>stdout</tt>:</div>\n";
- $GLOBALS["extra_goodies"].="<textarea rows=25 class='stdout'>";
- $GLOBALS["extra_goodies"].=tailCustom($stdoutpath,50);
- $GLOBALS["extra_goodies"].="</textarea>";
-
- if(!$removing) {
-  $returned_value=$pidArr[0]; 
-  report_and_log(true,$rdefined["name"]." ".$re."started ".make_presentable($pidArr[0],"pid"),"");
-  return true;
-  }
-
- if($removing) {
-  $trash["uuid"]=guidv4();
-  $trash["pointer_to_defined"]=$pdefined;
-  $trash["localfile"]=$in_PARAMS["running_localfile"];
-  $trash["rpmap"]=$prpmap;
-  # below not needed, never created.
-  #delete_row_bypass_schema($in_target_table,"uuid",$in_target);
-  insert_row("trashcan",$trash);
-  if(any_db_error()) { return false; }
-  report_and_log(true,$removing_info,"",false,"restart",$trash["uuid"]);
-  mbutton(BUTTONHTML_restart($trash["uuid"]));
-  }
-
- }
-
-# ----------------------------------------------------------------------------
-# [ === ROW METHOD HANDLER functions ]
-# - Row methods are specified in a table's FOR_THIS_APP virtual column.
-# ----------------------------------------------------------------------------
-
-function ROWMETHOD_execute_maint(
- $in_table, $in_target, $in_target_table, $in_PARAMS, $in_ini
- ) {
-
- # Resolve reference to maintenance request
- $rrequest=Array();
- if(!read_row_expecting_just_one($rrequest,$in_table,"uuid",$in_target)) { return false; }
-
- # Check if keys match, bounce if they don't.
- if($in_PARAMS["mkey"]!==$rrequest["mkey"]) {
-  merr("Confirmation key is wrong.  The request was not executed.");
-  mnotice("If you forgot the confirmation key, delete your request and try again.");
-  return false; 
-  }
-
- $not_implemented=false; $close=false;
- switch ($rrequest["request"]) {
-  case "deldb":
-   # TODO: Actually do this.
-   # mnotice("Database deleted.  It will be automatically recreated the next time the app is accessed.");
-   $not_implemented=true;
-   $close=true;
-   break;
-  default:
-   merr("Unrecognized request '".$rrequest["request"]."'.  The request was not executed.","hack");
-   $close=false;
-  }
-
- if($not_implemented) {
-  mnotice("'".$rrequest["request"]."' isn't implemented yet.  Nothing was done.");
-  }
-
- if($close) {
-  delete_row_bypass_schema($in_table,"uuid",$in_target);
-  if(any_db_error()) { return false; }
-  mnotice("closing request '".make_presentable($rrequest["uuid"],"uuid")."'.");
-  }
-
- }
-
-
-function ROWMETHOD_check_running( 
- $in_table, $in_target, $in_target_table, $in_PARAMS, $in_ini
- ) {
-
- # Resolve request to running process.
- $rrunning=Array();
- if(!read_row_expecting_just_one($rrunning,$in_target_table,"uuid",$in_target)) { return false; }
-
- # Running process points to a defined process.
- # Resolve reference to defined process - we need its name which lives there. 
- $name="Unknown Service"; $rdefined=Array();
- if(read_row_expecting_just_one($rdefined,"defined","uuid",$rrunning["pointer_to_defined"])) {
-  $name=$rdefined["name"];
-  }
- $pid=$rrunning["pid"];
-
- $removing=false; $removing_info="";
- 
- $update_data['lastchecked']=time();
- update_row($in_target_table,$update_data,"uuid",$in_target);
- 
- if(posix_getpgid($pid)) { 
-  report_and_log("true",make_presentable($pid,"pid")." is still running.","");
-  }else{
-  $removing=true; $removing_info=make_presentable($pid,"pid")." is no longer running.";
-  }
-
- if($removing) {
-  $trash["uuid"]=guidv4();
-  $trash["pointer_to_defined"]=$rrunning["pointer_to_defined"];
-  $trash["localfile"]=$rrunning["localfile"];
-  $trash["rpmap"]=$rrunning["rpmap"];
-  delete_row_bypass_schema($in_target_table,"uuid",$in_target);
-  if(any_db_error()) { return false; }
-  insert_row("trashcan",$trash);
-  if(any_db_error()) { return false; }
-  report_and_log(true,$removing_info,"",false,"restart",$trash["uuid"]);
-  mbutton(BUTTONHTML_restart($trash["uuid"]));
-  } 
-
- }
-
-
-function ROWMETHOD_stop_running(
- $in_table, $in_target, $in_target_table, $in_PARAMS, $in_ini
- ) {
-
- # Resolve reference to running process.
- $rrunning=Array();
- if(!read_row_expecting_just_one($rrunning,$in_target_table,"uuid",$in_target)) { return false; }
-
- # Running process points to a defined process.
- # Resolve reference to defined - we need its name which lives there.
- $name="Unknown Service"; $rdefined=Array();
- if(read_row_expecting_just_one($rdefined,"defined","uuid",$rrunning["pointer_to_defined"])) {
-  $name=$rdefined["name"];
-  }
- $pid=$rrunning["pid"];
-
- $removing=false; $removing_info="";
-
- if(posix_getpgid($pid)) {
-  posix_kill($pid,15);
-  sleep(2);
-  if(posix_getpgid($pid)) {
-   posix_kill($pid,9);
-   }
-  if(posix_getpgid($pid)) {
-   report_and_log(false,$name." not stopped - ".$pid." didn't respond to SIGINT or SIGKILL.","");
-   }else{
-   $removing=true; $removing_info=$name." stopped";
-   }
-  }else{
-  $removing=true; $removing_info=$pid." (".$name.") is not running anymore; removing PID from table.";
-  }
-
- if($removing) {
-  $trash["uuid"]=guidv4();
-  $trash["pointer_to_defined"]=$rrunning["pointer_to_defined"];
-  $trash["localfile"]=$rrunning["localfile"];
-  $trash["rpmap"]=$rrunning["rpmap"];
-  delete_row_bypass_schema($in_target_table,"uuid",$in_target);
-  if(any_db_error()) { return false; }
-  insert_row("trashcan",$trash);
-  if(any_db_error()) { return false; }
-  report_and_log(true,$removing_info,"",false,"restart",$trash["uuid"]);
-  mbutton(BUTTONHTML_restart($trash["uuid"]));
-  } 
-
- }
-
-
-function ROWMETHOD_stdout_running (
- $in_table, $in_target, $in_target_table, $in_PARAMS,
- $in_ini
- ) {
-
- # Resolve reference to running process.
- $rrunning=Array();
- if(!read_row_expecting_just_one($rrunning,$in_target_table,"uuid",$in_target)) { return false; }
-
- # Running process also points to a defined process.
- # Resolve that too...
- $pdefined=$rrunning["pointer_to_defined"];
- $rdefined=Array();
- if(!read_row_expecting_just_one($rdefined,"defined","uuid",$pdefined)) { return false; }
-
- # Defined process also points to a conf.
- # We really need that.
- $pconf=$rdefined["pointer_to_conf"];
- $rconf=Array(); 
- if(!read_row_expecting_just_one($rconf,"conf","uuid",$pconf)) { return false; }
-
- # Assemble stdoutpath (path from config, filename from service definition).
- $stdoutpath=path_merge(trim($rconf["stdoutfilepath"]),trim(make_filename_ready($rdefined["name"])."-stdout.txt"));
-
- $GLOBALS["extra_goodies"].="<div class='stdout-top'>Last 50 lines of captured <tt>stdout</tt>:</div>\n";
- $GLOBALS["extra_goodies"].="<textarea rows=25 class='stdout'>";
- $GLOBALS["extra_goodies"].=tailCustom($stdoutpath,50);
- $GLOBALS["extra_goodies"].="</textarea>";
-
- return true;
- }
-
-
-function ROWMETHOD_restart_trashcan (
- $in_table, $in_target, $in_target_table, $in_PARAMS,
- $in_ini
- ) {
- # Not invocable directly from the interface - but indirectly through buttons in
- # the action history.
-
- 
- # Resolve reference to piece of trash.
- $rpiece_of_trash=Array();
- if(!read_row_expecting_just_one($rpiece_of_trash,$in_target_table,"uuid",$in_target)) { 
-  mnotice("Stopped process '".$in_target."' not found; it may have already been restarted or the history was cleared."); 
-  return false;
-  }
- 
- # Restarting a process from the trash - we're gonna use the same API that a
- # POST request would.  So we'll supply the necessary data.
- $fakePOST["running_pointer_to_defined"]=$rpiece_of_trash["pointer_to_defined"];
- $fakePOST["running_localfile"]=$rpiece_of_trash["localfile"];
- $fakePOST["running_rpmap"]=$rpiece_of_trash["rpmap"]; 
- # $fakePOST["restart"] ...
- # This is a "backchannel" to tell GENERATOR_pid() to output "restarted"
- # instead of "started."
- $fakePOST["restart"]="true";
-
- $corpse=Array(); # ARRAY_IN_DATA() 
-
- # look for buttons referring to this trash item.
- $log_line=Array();
- read_row_expecting_just_one($log_line,"log","button_type_target",$in_target);
- if(any_db_error()) { return false; }
- $log_line["button_type"]="restarted";
- $log_line["button_type_target"]="none";
- update_row("log",$log_line,"button_type_target",$in_target); 
-
- # remove process (the piece of trash) from the trash
- delete_row_bypass_schema($in_target_table,"uuid",$in_target,false);
-
- # most of this is the same steps from the "new_row" action handler.
- do {
-  # the "fill_data" fnctions will take data in $fakePOST[] and fill in
-  # $corpse[] ...
-  fill_data_array_from_query_string("running",$fakePOST,$corpse);
-  # GENERATOR_pid() for the corpse dispatched by the below call.
-  fill_data_array_from_app_generated_injourneys("running",$corpse,$fakePOST,$in_ini);
-   if(any_errors()) { break; }
-  # Corpse should be reanimated at this point.
-  set_report_names_for_insert("running",$corpse);
-  make_backrefs_for_new_row("running",$corpse);
-  if(any_db_error()) { return false; }
-  insert_row("running",$corpse);
-  if(any_db_error()) { return false; }
-  } while (false); 
-  return true;
-
- }
-
-# ----------------------------------------------------------------------------
-# [ === BUTTONHTML functions ]
-# - Emit HTML to render button when one exists in the action history.
-#   Normally called by output_log().
-# ----------------------------------------------------------------------------
-
-function BUTTONHTML_restart($in_button_type_target) {
- $outstr="\n <tr><td class='logbutton-container'><form action='".$GLOBALS["scriptname"]."' method=post>"
-        ."\n <input class='logbutton' type=submit value='Restart Process' />"
-        ."\n <input type='hidden' id='action' name='action' value='row_method_action' />"
-        ."\n <input type='hidden' id='row_method' name='row_method' value='restart' />"
-        ."\n <input type='hidden' id='table' name='table' value='trashcan' />"
-        ."\n <input type='hidden' id='target' name='target' value='".$in_button_type_target."' />"
-        ."\n <input type='hidden' id='return_to' name='return_to' value='running' />"
-        ."\n </form></td></tr>\n"
-	;
- return $outstr;
- }
-
-function BUTTONHTML_restarted($in_button_type_target) {
- return "\n <tr><td class='logbutton-container'><p class='logbutton'>Restarted above</p></td></tr>\n";
- }
-
-# ----------------------------------------------------------------------------
-# [ === BUTTONFALLOFF functions ]
-# - The action history only holds so many items. 
-#   When an item in the action history table ("log") is deleted, and that
-#   log entry has a button, this is called to provide an opportunity to clean
-#   it up.
-# - Note: When the entire log is cleared, "erase-upon-clear-log" can handle
-#   the cleanup for any tables referenced by buttons in the "log" table.
-# ----------------------------------------------------------------------------
-
-function BUTTONFALLOFF_restart($in_button_type_target) {
- delete_row_bypass_schema("trashcan","uuid",$in_button_type_target,false);
- }
-
-function BUTTONFALLOFF_restarted($in_button_type_target) {
- delete_row_bypass_schema("trashcan","uuid",$in_button_type_target,false);
- }
-
-
-# ----------------------------------------------------------------------------
-# [ === VALIDATOR functions ]
-# - Can be provided for any row_column combination.  Will be called when new
-#   row data is being validated.  Expected to return true (OK) or false (bad).
-# ----------------------------------------------------------------------------
-
-function VALIDATOR_defined_arguments ( $in_data ) {
- $nbrackets=0; $firstflag=false;
- $chopped=explode("{",$in_data);
- foreach($chopped as $choppedmore) { 
-  if(!$firstflag) { $firstflag=true; continue; }
-  if(!str_contains($choppedmore,'}')) {
-   merr("Argument text is missing an ending '}'."); return false;
-   }
-  $to_bracket=explode('}',$choppedmore); $nbrackets++;
-  switch (trim(strtoupper($to_bracket[0]))) {
-   case "LOCALFILE":
-   case "URLPREFIX":
-   case "PORT":
-    break; 
-   case "";
-    merr("Argument text has a pair of brackets with nothing inbetween."); return false;
-    break;
-   default:
-    merr("Unknown substitutor '".$to_bracket[0]."'.");
-   } 
-  }
- 
- return true;
- }
-
-
-# ----------------------------------------------------------------------------
-# == = = = = = = = = = = = = =  END CALLABLES = = = = = = = = = = = = = = = ==
-# ----------------------------------------------------------------------------
+#   All of these really should be separate files but they're all combined here
+#   for simplicity of use.'
 
 # ----------------------------------------------------------------------------
 # == = = = = = = = = = = = = = = = = MAIN = = = = = = = = = = = = = = = = = ==
 # ----------------------------------------------------------------------------
+
+set_schemadef();
 
 # Get script name.
 # - Essential when the output format is HTML - used to generate the URL in
@@ -701,11 +109,11 @@ switch ($ACTION) {
    if(any_errors()) { break; }
   $o=$GLOBALS["report"]["target_objectname"]." '".$GLOBALS["report"]["target_instancename"]."'";
    if(any_errors()) {
-    report_and_log(false,"Error creating new ".$o,"Failed to create new ".$o."."); 
+    report_and_log_new_sql_txn(false,"Error creating new ".$o,"Failed to create new ".$o."."); 
     break;
     }else{
     $GLOBALS["sqltxn_commit"]=true;
-    report_and_log(true,"new ".$o." created",""); 
+    report_and_log_new_sql_txn(true,"new ".$o." created",""); 
     }
   break;
  # ---------------------------------------------------------------------------
@@ -738,7 +146,7 @@ switch ($ACTION) {
     break;
     }else{
     $GLOBALS["sqltxn_commit"]=true;
-    report_and_log(true,"Deleted ".$o,"");
+    report_and_log_new_sql_txn(true,"Deleted ".$o,"");
     }
   break;
  # ---------------------------------------------------------------------------
@@ -803,11 +211,11 @@ switch ($ACTION) {
    if(any_errors()) { break; }
   update_row("internal",Array("nlog"=>0),"rowid",1);
    if(any_errors()) {
-    report_and_log(false,"Clearing action history failed.","");
+    report_and_log_new_sql_txn(false,"Clearing action history failed.","");
     break;
     }else{
     $GLOBALS["sqltxn_commit"]=true;
-    report_and_log(true,"Action history cleared.","");
+    report_and_log_new_sql_txn(true,"Action history cleared.","");
     }
   break;
  # ---------------------------------------------------------------------------
@@ -955,6 +363,11 @@ exit;
 
 # ----------------------------------------------------------------------------
 # == = = = = = = = = = = = = = = = END MAIN = = = = = = = = = = = = = = = = ==
+# ----------------------------------------------------------------------------
+
+
+# ----------------------------------------------------------------------------
+# == = = = = = = = = = = = = = = SUBROUTINES  = = = = = = = = = = = = = = = ==
 # ----------------------------------------------------------------------------
 
 # Section Index:
@@ -1854,75 +1267,8 @@ function new_form_defaults_from_table($in_which_table,
 # ----------------------------------------------------------------------------
 
 
-function tables_from_schemadef() {
-# Get list of all tables from global schema definition
-
- static $out_array_tablelist_cached=Array();
- $out_array_tablelist=Array();
-
- # Loop through all global schema definition key-value pairs.
- if(count($out_array_tablelist_cached)!=0) {
-  return $out_array_tablelist_cached;
-  }
-
- foreach($GLOBALS["schemadef"] as $tblcolname=>$colattrs) {
-   # Key-value pair format is 'table_name/column_name'.
-   $tmp_array=explode('/',$tblcolname);
-   $n=$tmp_array[0];
-   # Add table name to outgoing array, if we haven't seen it before.
-   if(!(in_array($n,$out_array_tablelist))){ $out_array_tablelist[]=$n; }
-   }
-  return $out_array_tablelist;
- }
-
-
-function is_table_known($in_table) {
- # Don't issue message for "none", but do say we don't know the table.
- if($in_table==="none"){ return false; }
- # Otherwise verify against schema and report accordingly.
- $tables=tables_from_schemadef();
- if(in_array($in_table,$tables)){ return true; }
- merr("Table '".$in_table."' isn't in this database.","hack");
- return false;
- }
-
-
-function schema_rowattr($schema_row) {
- static $unpacked=Array();
-
- if(isset($unpacked[$schema_row])) {
-  return $unpacked[$schema_row];
-  }
-
- $unpacked_line=Array();
- unpack_attrs($GLOBALS["schemadef"][$schema_row],$unpacked_line); 
- $unpacked[$schema_row]=$unpacked_line;
- return $unpacked[$schema_row];
- }
-
-
-function unpack_attrs($in_schemadef_line,&$out_array_attrs) {
-# Unpack a packed validator attribute list from a global schema definition
-# line into an associative array.
-# - Unpacking runs trim() on the contents.
-
- $out_array_attrs=Array();
- $tmp_array=explode('/',$in_schemadef_line);
- # Loop through all '/'-separated sections in schema definition key.
- foreach($tmp_array as $tmp) {
-  # Each section has a 'name:value' pair that must be further separated.
-  $tmp_array_2=explode(':',$tmp);
-  if(isset($tmp_array_2[1])){
-   $out_array_attrs[$tmp_array_2[0]]=trim($tmp_array_2[1]);
-  }else{
-   $out_array_attrs[$tmp_array_2[0]]="";
-   }
-  }
-
- }
-
 function sql_to_make_table_from_schemadef($in_which_table) {
-# Generate SQL to create table, from schema definition.
+# Generate a SQL statement to create a table, from schema definition.
 # Outer code is responsible for actually executing it.
 #
  $out_sql="CREATE TABLE ".$in_which_table." (";
@@ -1961,8 +1307,81 @@ function sql_to_make_table_from_schemadef($in_which_table) {
  return $out_sql;
  }
 
+
+function tables_from_schemadef() {
+# Get list of all tables from global schema definition
+
+ static $out_array_tablelist_cached=Array();
+ $out_array_tablelist=Array();
+
+ # Loop through all global schema definition key-value pairs.
+ if(count($out_array_tablelist_cached)!=0) {
+  return $out_array_tablelist_cached;
+  }
+
+ foreach($GLOBALS["schemadef"] as $tblcolname=>$colattrs) {
+   # Key-value pair format is 'table_name/column_name'.
+   $tmp_array=explode('/',$tblcolname);
+   $n=$tmp_array[0];
+   # Add table name to outgoing array, if we haven't seen it before.
+   if(!(in_array($n,$out_array_tablelist))){ $out_array_tablelist[]=$n; }
+   }
+  return $out_array_tablelist;
+ }
+
+
+function is_table_known($in_table) {
+# Returns true or false - is table defined in schema?
+# Issues an merr() if not defined, unless table is "none".
+ # Don't issue message for "none", but do say we don't know the table.
+ if($in_table==="none"){ return false; }
+ # Otherwise verify against schema and report accordingly.
+ $tables=tables_from_schemadef();
+ if(in_array($in_table,$tables)){ return true; }
+ merr("Table '".$in_table."' isn't in this database.","hack");
+ return false;
+ }
+
+
+function schema_rowattr($schema_row) {
+# Unpacks a column's attributes into an associative array and returns that.
+# Caches unpacked column data so OK to call over and over for the same column.
+ static $unpacked=Array();
+
+ if(isset($unpacked[$schema_row])) {
+  return $unpacked[$schema_row];
+  }
+
+ $unpacked_line=Array();
+ unpack_attrs($GLOBALS["schemadef"][$schema_row],$unpacked_line); 
+ $unpacked[$schema_row]=$unpacked_line;
+ return $unpacked[$schema_row];
+ }
+
+
+function unpack_attrs($in_schemadef_line,&$out_array_attrs) {
+# Unpack a packed validator attribute list from a global schema definition
+# line into an associative array.
+# - Unpacking runs trim() on the contents.
+
+ $out_array_attrs=Array();
+ $tmp_array=explode('/',$in_schemadef_line);
+ # Loop through all '/'-separated sections in schema definition key.
+ foreach($tmp_array as $tmp) {
+  # Each section has a 'name:value' pair that must be further separated.
+  $tmp_array_2=explode(':',$tmp);
+  if(isset($tmp_array_2[1])){
+   $out_array_attrs[$tmp_array_2[0]]=trim($tmp_array_2[1]);
+  }else{
+   $out_array_attrs[$tmp_array_2[0]]="";
+   }
+  }
+
+ }
+
+
 function columns_from_schemadef($in_table) {
-# Get list of all columns of a table from schema definition
+# Get list of all columns of a table from schema definition.
 
  $out_array_columnlist=Array();
  # Loop through all schema definition keys.
@@ -1979,11 +1398,12 @@ function columns_from_schemadef($in_table) {
   return $out_array_columnlist;
  }
 
+
 function parse_out_injourney_info($in_attrs) {
 # Break down "in journey" data into an associative array.
 # - Needs all attributes because some "in journeys" use pointers defined
 #   outside of the "injourney:" option.
-# - "In journey" refers to who and how the data is obtained.
+# - "In journey" refers to who provides the data and how the data is obtained.
 
  if(!isset($in_attrs["injourney"])) { return Array(); }
  $in_injourney_value=$in_attrs["injourney"];
@@ -2020,22 +1440,24 @@ function parse_out_injourney_info($in_attrs) {
  return $tmp;
  }
 
+
 # ----------------------------------------------------------------------------
 # [ Handling generated data ]
 # ----------------------------------------------------------------------------
+
 
 function fill_data_array_from_app_generated_injourneys(
  $in_which_table, &$out_array_data, $in_PARAMS,
  $in_ini
  ) {
- # Goes through $in_PARAMS, looks for query strings whose "in journey" is
- # "app-generates" and makes a generator call to get the data
- #
- # Both this function and fill_data_array_from_query_string are intended to
- # collect data to the same array, $out_array_data (by reference).
- #
- # Will add errors to $GLOBALS["outmsgs"] if a generator call fails.
- # Assumes table exists.
+# Goes through $in_PARAMS, looks for query strings whose "in journey" is
+# "app-generates" and makes a generator call to get the data.
+#
+# Both this function and fill_data_array_from_query_string are intended to
+# collect data to the same array, $out_array_data (by reference).
+#
+# Will add errors to $GLOBALS["outmsgs"] if a generator call fails.
+# Assumes table exists.
 
  # Check table metadata ...
  $table_metadata=schema_rowattr($in_which_table.'/FOR_THIS_APP');
@@ -2111,14 +1533,14 @@ function generate_app_value(
 function fill_data_array_from_query_string(
  $in_which_table, $in_PARAMS, &$out_array_data
  ) {
- # Goes through $in_PARAMS, looks for query strings that match the columns in
- # $in_which_table, and puts them in $out_array_data.  $in_PARAMS would
- # normally just be $_POST or similar.
- #
- # Will add errors to $GLOBALS["outmsgs"] if a column can't be matched with a query
- # string parameter (and the column's "in journey" is not "app-generates").
- #
- # - Assumes table exists.
+# Goes through $in_PARAMS, looks for query strings that match the columns in
+# $in_which_table, and puts them in $out_array_data.  $in_PARAMS would
+# normally just be $_POST or similar.
+#
+# Will add errors to $GLOBALS["outmsgs"] if a column can't be matched with a query
+# string parameter (and the column's "in journey" is not "app-generates").
+#
+# - Assumes table exists.
 
  # Check table metadata ...
  # (This is redundant if fill_data_array_from_app_generated_journeys() is
@@ -2159,8 +1581,8 @@ function fill_data_array_from_query_string(
   }
  }
 
- function validate_data_array(
- $in_which_table, &$out_array_data
+function validate_data_array(
+$in_which_table, &$out_array_data
  ) {
 # Assumes $in_which_table is known to be in the database already.
 
@@ -2745,6 +2167,7 @@ function open_database($in_filename) {
 
 
 function begin_sql_transaction() {
+# Start SQL transaction.  Sets $GLOBALS[""sqltxn_commit"]" flag to false.
  mtrace("DB op: begin_sql_transaction()");
 
  # We can't do anything if database isn't open.
@@ -2763,6 +2186,10 @@ function begin_sql_transaction() {
 
 
 function end_any_sql_transaction() {
+# Ends any SQL transaction if there is one.
+# $GLOBALS["sqltxn_commit"]--if set--means a transaction exists.
+# If it's true, transaction is ended with a COMMIT.
+# If it's false, transaction is ended with a ROLLBACK.
  mtrace("DB op: end_any_sql_transaction()");
 
  # Nothing to do if database wasn't ever opened.
@@ -3111,11 +2538,11 @@ function any_db_error() {
  return true;
  }
 
+
 function open_database_2($in_filename) {
- # Does not consult schema.
- # Open 2nd handle to database, read only.
- # This won't create any tables.  This function shouldn't be called unless
- # open_database() was called first anyway.
+# Open 2nd handle to database, read only.
+# This won't create any tables.  This function shouldn't be called unless
+# open_database() was called first anyway.
   mtrace("DB op: open_database_2($in_filename)");
 
  $GLOBALS["dbo2"]=new SQLite3($in_filename,SQLITE3_OPEN_READONLY);
@@ -3472,18 +2899,23 @@ function any_errors(){
 
 function mdebug($in_msg_text) {
 # Debug messages.
+
  $GLOBALS["outmsgs"]["debug"][]=$in_msg_text;
  }
 
 
 function mnotice($in_msg_text) {
 # Notices.
+
  $GLOBALS["outmsgs"]["notices"][]=$in_msg_text; 
  }
 
 
 function mbutton($in_button_html_text) {
-# HTML buttons.
+# HTML buttons - output with the rest of the result report messages.
+# Allows end user to issue a quick action from the result page if it makes
+# sense for the app to provide one.
+
  $GLOBALS["outmsgs"]["buttons"][]=$in_button_html_text;
  }
 
@@ -3507,6 +2939,8 @@ function merr($in_msg_text,$in_flags="") {
 
 
 function mtrace($in_msg_text,$in_flags="") {
+# Trace messages.
+
  if($in_flags==="") {
   $GLOBALS["outmsgs"]["trace"][]=$in_msg_text;
   } else {
@@ -3515,16 +2949,16 @@ function mtrace($in_msg_text,$in_flags="") {
  }
 
 
-function report_and_log($in_success,
+function report_and_log_new_sql_txn($in_success,
    			$in_eventdesc,$in_eventbody,
 			$offer_event_view=false,
 			$button_type="none", $button_type_target="none"
 			) {
 # 1. Issues a notice or error depending on first parameter which indicates
 #    whether something succeeded (true) or failed (false).
-# 2. Also writes in and other data optionally ($in_event_body) to the action
-#    history.
-# 3. Ends current SQL transaction and begins a new one.
+# 2. Writes $in_eventdesc, $in_eventbody to the log.
+# 3. Ends current SQL transaction and begins a new one before it makes a
+#    call to log_entry().
 
  end_any_sql_transaction();
  begin_sql_transaction();
@@ -3771,5 +3205,627 @@ function style_sheet() {
 
  htmlout("</style>");
  }
+
+
+# ----------------------------------------------------------------------------
+# == = = = = = = = = = = = = = END SUBROUTINES  = = = = = = = = = = = = = = ==
+# ----------------------------------------------------------------------------
+
+
+# ----------------------------------------------------------------------------
+# == = = = = = = = = = = = Master Schema Definition = = = = = = = = = = = = ==
+# - Defines tables and columns.
+# - Virtual column name "FOR_THIS_APP" defines some things for the entire
+#   table.
+# - Data for validation and methods are included as well as data constraints.
+# ----------------------------------------------------------------------------
+
+function set_schemadef() {
+$GLOBALS["schemadef"]=Array(
+ 'conf/FOR_THIS_APP'	    	=>  'title:Configuration'
+		            	    	   .'/new-form-title:			    Configuration'
+		            	    	   .'/allow-delete-by:			    uuid'
+		            	    	   .'/single-row-only'
+		            	    	   .'/single-row-only-empty-message:No configuration currently defined'
+		            	    	   .'/friendly-object-name:		    configuration'
+			                 	   .'/instance-friendly-name-is:	uuid'
+			        	           .'/toplink:				        configure'
+			                	   ,
+ 'conf/uuid'		        	=>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
+ 'conf/basefilepath'	    	=>  'req:y/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localdir/form-label:Base File Path/default-value-from-ini:homedir/present-width:full-width',
+ 'conf/stdoutfilepath'	    	=>  'req:y/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localdir/form-label:stdout File Path/default-value-from-ini:stdoutdir/present-width:full-width',
+ # ---------------------------------------------------------------------------
+ 'rpmap/FOR_THIS_APP'	    	=>  'title:Locations (Port and Prefix)'
+			                  	   .'/new-form-title:			    Define A Port and Prefix Combination'
+		                		   .'/allow-delete-by:		    	uuid'
+		                		   .'/row-must-exist-in:	    	conf'
+	            	    		   .'/must-exist-in-fails-message:	You can&apos;t define a location until you create a configuration.'
+	            		    	   .'/friendly-object-name:		    location'
+	            		    	   .'/instance-friendly-name-is:	number'
+	            	    		   .'/toplink:				        locations'
+	            			       ,
+ 'rpmap/pointer_to_conf'	    =>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Under Configuration/dont-show'.
+				                    '/is-pointer-to:conf/pointer-links-by:uuid/shown-by:basefilepath',
+ 'rpmap/uuid'			        =>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
+ 'rpmap/number'		        	=>  'req:y/type:int/data:port/minval:1024/maxval:  65535/injourney:user-enters-text-for-number/form-label:TCP&#47;IP Port Number/must-be-unique',
+ 'rpmap/urlprefix'	         	=>  'req:y/type:str/data:url /minlen:   1/maxlen:   1024/injourney:user-enters-text-for-urlprefix/form-label:URL Prefix',
+ # ---------------------------------------------------------------------------
+ 'defined/FOR_THIS_APP'		    =>  'title:Services'
+		            	    	   .'/new-form-title:			    Define A Service'
+		            		       .'/allow-delete-by:			    uuid'
+	            		    	   .'/row-must-exist-in:	    	conf'
+		            	    	   .'/must-exist-in-fails-message:	You can&apos;t create a service until you create a configuration.'
+		            		       .'/friendly-object-name:		    service'
+		            		       .'/instance-friendly-name-is:	name'
+		            		       .'/toplink:				        services'
+		            		       ,
+ 'defined/pointer_to_conf'	    =>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Under Configuration/dont-show'.
+			            	        '/is-pointer-to:conf/pointer-links-by:uuid/shown-by:basefilepath',
+ 'defined/uuid'		    	    =>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
+ 'defined/name'		    	    =>  'req:y/type:str/data:name/minlen:   1/maxlen:     50/injourney:user-enters-text/form-label:Service Name',
+ 'defined/description'	    	=>  'req:n/type:str/data:name/minlen:   0/maxlen:   4000/injourney:user-enters-text/form-label:Service Description',
+ 'defined/command'	    	    =>  'req:y/type:str/data:cmd /minlen:   1/maxlen:    500/injourney:user-selects-from-ini-list/form-label:Command/present-width:full-width'.
+				                    '/ini-list-section:whitelist/ini-list-array:bin',
+ 'defined/arguments'		    =>  'req:n/type:str/data:name/minlen:   0/maxlen:   4000/injourney:user-enters-text/form-label:Command Arguments (With Substitution Points)/present-width:full-width',
+ 'defined/defaultfile'	    	=>  'req:n/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text/form-label:Default File (blank for none) {LOCALFILE}'.
+				                    '/provides-defaults/gives-default-for-table:running/gives-default-for-column:localfile',
+ 'defined/defaultrpmap'		    =>  'req:n/type:int/data:port/minval:1024/maxval:  65535/injourney:user-selects-from-list-in-other-table/form-label:Port And URL Prefix Combo'.
+			                	    '/provides-defaults/gives-default-for-table:running/gives-default-for-column:rpmap'.
+			            	        '/is-pointer-to:rpmap/pointer-links-by:number/shown-by:number,urlprefix',
+ # ---------------------------------------------------------------------------
+ 'running/FOR_THIS_APP'		    =>  'title:Processes (Started Services)'
+				                   .'/new-form-title:		    	Start A Service'
+				                   .'/table-method:check,Check All Processes'
+				                   .'/each-row-method:stdout,View output,uuid;stop,Stop Process,uuid;check,Check If Still Running,uuid'
+				                   .'/row-must-exist-in:		        defined'
+				                   .'/must-exist-in-fails-message:	No defined services to start.'
+				                   .'/defaults-provided-by:	    	defined'
+				                   .'/defaults-in-provider-keyed-by:	uuid'
+				                   .'/defaults-here-keyed-by:		pointer_to_defined'
+				                   .'/friendly-object-name:	    	process'
+				                   .'/instance-friendly-name-is: 	pid'
+				                   .'/backref-by:		        	uuid'
+				                   .'/toplink:			        	processes'
+				                   ,
+ 'running/uuid'			        =>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
+ 'running/pointer_to_defined'   =>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Instance Of'.
+			            	        '/is-pointer-to:defined/pointer-links-by:uuid/shown-by:name'.
+				                    '/display-using-other-table/display-sql-SELECT:name/display-sql-FROM:defined/display-sql-WHERE:uuid/display-sql-IS:pointer_to_defined',
+ 'running/pid'		    	    =>  'req:y/type:int/data:pid /minval:   2/maxval:4194304/injourney:app-generates/form-label:Process ID',
+ 'running/localfile'		    =>  'req:n/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localfile/form-label:Local File {LOCALFILE}/present-width:full-width',
+ 'running/rpmap'		        =>  'req:n/type:int/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Location (Port and URL Prefix)/must-be-unique'.
+	   			                    '/is-pointer-to:rpmap/pointer-links-by:number/shown-by:number,urlprefix'.
+				                    '/display-using-other-table/display-sql-SELECT:number,urlprefix/display-sql-FROM:rpmap/display-sql-WHERE:number/display-sql-IS:rpmap',
+ 'running/lastchecked'	    	=>  'req:n/type:str/data:date/minlen:   0/maxlen:       0/injourney:row-method/form-label:Last Checked',
+ # ---------------------------------------------------------------------------
+ 'maint/FOR_THIS_APP'	    	=>  'title:Maintenance Command Requests'
+				                   .'/new-form-title:			    Maintenance Request'
+			                	   .'/allow-delete-by:			    uuid'
+			                	   .'/single-row-only'
+		            	    	   .'/single-row-only-empty-message:No active maintenance request.'
+			                	   .'/friendly-object-name:		    maintenance request'
+			                	   .'/instance-friendly-name-is:	request'
+		            	    	   .'/each-row-method:execute,Execute maintenance request,uuid'
+		            	    	   .'/toplink:				        MR'
+			                	   ,
+ 'maint/uuid'	       	    	=>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:MRN',
+ 'maint/request'	        	=>  'req:y/type:str/data:name/minlen:   1/maxlen:      64/injourney:user-selects-from-this-list/form-label:Action/this-list:deldb=Delete Database',
+ 'maint/mkey'		         	=>  'req:y/type:str/data:name/minlen:  16/maxlen:    256/injourney:user-enters-text/form-label:Enter A Confirmation Password'.
+				                    '/is-confirmation-key-for:execute/confirmation-placeholder:Enter Confirmation Password',
+ # ---------------------------------------------------------------------------
+ 'trashcan/FOR_THIS_APP'	    =>  'title:Recycle Bin'
+			                	   .'/allow-delete-by:			    uuid'
+			                	   .'/each-row-method:restart,Restart This Process,uuid'
+			                	   .'/friendly-object-name:		    previous process'
+			                	   .'/instance-friendly-name-is:	previous process'
+			            	       .'/erase-upon-clear-logs'
+			            	       ,
+ 'trashcan/uuid'	    	    =>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
+ 'trashcan/pointer_to_defined'	=>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Instance Of'.
+				                    '/is-pointer-to:defined/pointer-links-by:uuid/shown-by:name'.
+				                    '/display-using-other-table/display-sql-SELECT:name/display-sql-FROM:defined/display-sql-WHERE:uuid/display-sql-IS:pointer_to_defined',
+ 'trashcan/localfile'	    	=>  'req:n/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localfile/form-label:Local File {LOCALFILE}',
+ 'trashcan/rpmap'		        =>  'req:n/type:int/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Port And URL Prefix Combo'.
+	   			                    '/is-pointer-to:rpmap/pointer-links-by:number/shown-by:number,urlprefix'.
+				                    '/display-using-other-table/display-sql-SELECT:number,urlprefix/display-sql-FROM:rpmap/display-sql-WHERE:number/display-sql-IS:rpmap',
+ );
+}
+
+
+# ----------------------------------------------------------------------------
+# == = = = = = = = = = = End Master Schema Definition = = = = = = = = = = = ==
+# ----------------------------------------------------------------------------
+
+
+# ----------------------------------------------------------------------------
+# == = = = = = = = = = = = = = = CALLABLES  = = = = = = = = = = = = = = = = ==
+# ----------------------------------------------------------------------------
+
+# Section Index:
+# - HOMEPAGE()
+# - GENERATOR_xxx()
+# - ROWMETHOD_xxx()
+# - BUTTONHTML_xxx()
+# - BUTTONFALLOFF_xxx()
+# - VALIDATOR_xxx()
+
+function HOMEPAGE() {
+# Called via null_request() when the action is "show", the table is "none.",
+# and $GLOBALS["output_format"] is "html".
+# Uses $GLOBALS["username"].
+
+ # Basically, a friendly, standard introduction.
+ htmlout("<p>This is <span class='tt'>lsc</span> - Lawrence's Service Controller.</p>");
+ htmlout("<p><span class='tt'>lsc</span> allows you to define <i>services</i>, and once defined, start and stop them.</p>");
+ htmlout("<p>A service is a command that takes a filename, URL prefix, and/or a port number as part of its arguments.  These types of commands typically serve files over your network or the Internet and may be something you wish to conveniently start and stop remotely.</p>");
+ htmlout("<p>If this is a new instance, you will first need to whitelist your desired executables in <code>lsc</code>'s .INI file (<span class='tt'>/etc/lsc/".$GLOBALS["username"]."/lsc.ini</span>).  Then create a configuration.  Next, you'll want to define some locations, a service or two, and after that, you can start and stop them from this interface.</p>");
+ htmlout("<p><span class='tt'>lsc</span> as shipped will not run as root, can only launch executables that are whitelisted, will not run setuid/setgid executables, and can only manage services it has started that are running under the same local user account as itself.  There is also an internal blacklist of executable names <span class='tt'>lsc</span> will refuse to run, such as <span class='tt'>/bin/rm</span>.</p>");
+ }
+
+# ----------------------------------------------------------------------------
+# [ === GENERATOR functions ]
+# - When the user wants to create a new row, column data for that table can be
+#   supplied by the user, or generated by the app.
+# - For columns that are app generated, generators are called to supply the
+#   needed data.
+# - Generators may also make the app perform an action.
+# - If a generator returns false, it is assumed something went wrong and a new
+#   database row is not created.
+# - The value that the generator is giving back to be put in the database is
+#   in &$returned_value passed by reference.
+# (See function generate_app_value().)
+#
+# GENERATOR_xxx parameters:
+# - &$returned_value: generator function needs to set this, this will be the
+#   value added in the column, IF the function returns true.
+# - $in_table: table containing row/column needing new value.
+# - $in_col: column needing new value.
+# - $in_array_col_attrs: column attributes from global schema definition.
+# - $in_PARAMS:
+# ----------------------------------------------------------------------------
+
+
+function GENERATOR_pid (
+ &$returned_value, $in_table, $in_col, $in_array_col_attrs, $in_PARAMS, $in_ini
+ ) {
+ # Generating a pid = creating a new process.
+ # https://stackoverflow.com/questions/9445815/how-to-background-a-process-via-proc-open-and-have-access-to-stdin
+
+ # Resolve reference to defined process.
+ $pdefined=$in_PARAMS["running_pointer_to_defined"];
+ $rdefined=Array();
+ if(!read_row_expecting_just_one($rdefined,"defined","uuid",$pdefined)) { return false; }
+
+ # Defined process points to an rpmap.
+ # Resolve reference to rpmap - needed to get port and urlprefix.
+ $prpmap=$in_PARAMS["running_rpmap"];
+ $rrpmap=Array();
+ if(!read_row_expecting_just_one($rrpmap,"rpmap","number",$prpmap)) { return false; }
+
+ # Defined process also points to a conf.
+ # Resolve reference to conf - needed to get stdout path.
+ $pconf=$rdefined["pointer_to_conf"];
+ $rconf=Array();
+ if(!read_row_expecting_just_one($rconf,"conf","uuid",$pconf)) { return false; }
+
+ # Start building the command.  It begins with, well, the command.
+ $cmd=$rdefined["command"];
+
+ # Start building the arguments.
+ $args="";
+
+ # Doing that involves expanding substitution points in arguments.
+ $nbrackets=0; $firstflag=false;
+ $errorflag=false;
+
+ $chopped=explode("{",$rdefined["arguments"]); # split stuff up based on {'s initially.
+ foreach($chopped as $choppedmore) {
+  # stuff BEFORE the first { is stuff we want to keep as part of the command.
+  if(!$firstflag) { $firstflag=true; $args.=$choppedmore; continue; }
+  # Each substring should have a } somewhere in it, otherwise there is not one
+  # } for each {.
+  if(!str_contains($choppedmore,'}')) {
+   merr("Argument text is missing an ending '}'."); $errorflag=true;
+   }
+  # split the substring on the }.
+  # Stuff before the } is part of the substitutor. 
+  # Stuff after gets tacked on the command.
+  $to_bracket=explode('}',$choppedmore); $nbrackets++;
+  # Do the actual substitution.
+  switch (trim(strtoupper($to_bracket[0]))) {
+   case "LOCALFILE":	$args.=$in_PARAMS["running_localfile"]; break;
+   case "URLPREFIX":	$args.=$rrpmap["urlprefix"]; break;
+   case "PORT":		$args.=$in_PARAMS["running_rpmap"]; break;
+   case "";
+    merr("Argument text has a pair of brackets with nothing inbetween.");
+    $errorflag=true;
+    break;
+   default:
+    merr("Unknown substitutor '".$to_bracket[0]."'.");
+    $errorflag=true;
+   }
+  $args.=$to_bracket[1];
+  }
+ # Any errors processing the substitutions, we exit with an error.
+ if ($errorflag) { return false; }
+ 
+ # Check executable against blacklist.
+ # Each time, every time. You never know.
+ $tmp=explode(" ",$cmd);
+ if(is_blacklisted($tmp[0])) { return false; }
+ # Check executable suid/sgid bits.
+ # Each time, every time. You never know.
+ $mode=fileperms($tmp[0]);
+ if(is_bool($mode)) {
+  report_and_log_new_sql_txn_new_sql_txn(false,"Unable to check executable permissions. Process was not started.","");
+  return false;
+  }
+ if(($mode & 06000)!=0) {
+  report_and_log_new_sql_txn(false,"Executable has suid or sgid bit set. Process was not started.","");
+  return false;
+  }
+
+ # This is a "backchannel" flag set by ROWMETHOD_restart_trashcan to indicate
+ # we are actually restarting a process.
+ # If we are doing that we want to say "restart" instead of "start".
+ $re="";
+ if(isset($in_PARAMS["restart"])) { $re="re"; }
+
+ # Assemble stdoutpath (path from config, filename from service definition).
+ $stdoutpath=path_merge(trim($rconf["stdoutfilepath"]),trim(make_filename_ready($rdefined["name"])."-stdout.txt"));
+
+ # We might immediately "remove" the row (actually, not even create it) if the
+ # launch is not successful.  So, we'll need these ...
+ $removing=false; $removing_info="";
+
+ # Ok, let's launch!
+ $pidArr=Array();
+ $exec_result=exec(sprintf("%s > %s 2>&1 & echo $!", trim($cmd." ".$args), $stdoutpath), $pidArr);
+ # Result:
+ if($exec_result==false) {
+  $removing=true; $removing_info=$rdefined["name"]." not ".$re."started (exec failed)";
+  }
+ if(!(isset($pidArr[0]))) {
+  $removing=true; $removing_info=$rdefined["name"]." not ".$re."started (no PID returned from exec)";
+  }
+ 
+ # Make sure it doesn't die right away.
+ sleep(2);
+ if(!posix_getpgid($pidArr[0])) {
+  $removing=true; $removing_info=make_presentable($pidArr[0],"pid")." was started, but then died right away.";
+  }
+
+ $GLOBALS["extra_goodies"].="<div class='stdout-top'>Last 50 lines of captured <tt>stdout</tt>:</div>\n";
+ $GLOBALS["extra_goodies"].="<textarea rows=25 class='stdout'>";
+ $GLOBALS["extra_goodies"].=tailCustom($stdoutpath,50);
+ $GLOBALS["extra_goodies"].="</textarea>";
+
+ if(!$removing) {
+  $returned_value=$pidArr[0]; 
+  report_and_log_new_sql_txn(true,$rdefined["name"]." ".$re."started ".make_presentable($pidArr[0],"pid"),"");
+  return true;
+  }
+
+ if($removing) {
+  $trash["uuid"]=guidv4();
+  $trash["pointer_to_defined"]=$pdefined;
+  $trash["localfile"]=$in_PARAMS["running_localfile"];
+  $trash["rpmap"]=$prpmap;
+  # below not needed, never created.
+  #delete_row_bypass_schema($in_target_table,"uuid",$in_target);
+  insert_row("trashcan",$trash);
+  if(any_db_error()) { return false; }
+  report_and_log_new_sql_txn(true,$removing_info,"",false,"restart",$trash["uuid"]);
+  mbutton(BUTTONHTML_restart($trash["uuid"]));
+  }
+
+ }
+
+# ----------------------------------------------------------------------------
+# [ === ROW METHOD HANDLER functions ]
+# - Row methods are specified in a table's FOR_THIS_APP virtual column.
+# ----------------------------------------------------------------------------
+
+function ROWMETHOD_execute_maint(
+ $in_table, $in_target, $in_target_table, $in_PARAMS, $in_ini
+ ) {
+
+ # Resolve reference to maintenance request
+ $rrequest=Array();
+ if(!read_row_expecting_just_one($rrequest,$in_table,"uuid",$in_target)) { return false; }
+
+ # Check if keys match, bounce if they don't.
+ if($in_PARAMS["mkey"]!==$rrequest["mkey"]) {
+  merr("Confirmation key is wrong.  The request was not executed.");
+  mnotice("If you forgot the confirmation key, delete your request and try again.");
+  return false; 
+  }
+
+ $not_implemented=false; $close=false;
+ switch ($rrequest["request"]) {
+  case "deldb":
+   # TODO: Actually do this.
+   # mnotice("Database deleted.  It will be automatically recreated the next time the app is accessed.");
+   $not_implemented=true;
+   $close=true;
+   break;
+  default:
+   merr("Unrecognized request '".$rrequest["request"]."'.  The request was not executed.","hack");
+   $close=false;
+  }
+
+ if($not_implemented) {
+  mnotice("'".$rrequest["request"]."' isn't implemented yet.  Nothing was done.");
+  }
+
+ if($close) {
+  delete_row_bypass_schema($in_table,"uuid",$in_target);
+  if(any_db_error()) { return false; }
+  mnotice("closing request '".make_presentable($rrequest["uuid"],"uuid")."'.");
+  }
+
+ }
+
+
+function ROWMETHOD_check_running( 
+ $in_table, $in_target, $in_target_table, $in_PARAMS, $in_ini
+ ) {
+
+ # Resolve request to running process.
+ $rrunning=Array();
+ if(!read_row_expecting_just_one($rrunning,$in_target_table,"uuid",$in_target)) { return false; }
+
+ # Running process points to a defined process.
+ # Resolve reference to defined process - we need its name which lives there. 
+ $name="Unknown Service"; $rdefined=Array();
+ if(read_row_expecting_just_one($rdefined,"defined","uuid",$rrunning["pointer_to_defined"])) {
+  $name=$rdefined["name"];
+  }
+ $pid=$rrunning["pid"];
+
+ $removing=false; $removing_info="";
+ 
+ $update_data['lastchecked']=time();
+ update_row($in_target_table,$update_data,"uuid",$in_target);
+ 
+ if(posix_getpgid($pid)) { 
+  report_and_log_new_sql_txn("true",make_presentable($pid,"pid")." is still running.","");
+  }else{
+  $removing=true; $removing_info=make_presentable($pid,"pid")." is no longer running.";
+  }
+
+ if($removing) {
+  $trash["uuid"]=guidv4();
+  $trash["pointer_to_defined"]=$rrunning["pointer_to_defined"];
+  $trash["localfile"]=$rrunning["localfile"];
+  $trash["rpmap"]=$rrunning["rpmap"];
+  delete_row_bypass_schema($in_target_table,"uuid",$in_target);
+  if(any_db_error()) { return false; }
+  insert_row("trashcan",$trash);
+  if(any_db_error()) { return false; }
+  report_and_log_new_sql_txn(true,$removing_info,"",false,"restart",$trash["uuid"]);
+  mbutton(BUTTONHTML_restart($trash["uuid"]));
+  } 
+
+ }
+
+
+function ROWMETHOD_stop_running(
+ $in_table, $in_target, $in_target_table, $in_PARAMS, $in_ini
+ ) {
+
+ # Resolve reference to running process.
+ $rrunning=Array();
+ if(!read_row_expecting_just_one($rrunning,$in_target_table,"uuid",$in_target)) { return false; }
+
+ # Running process points to a defined process.
+ # Resolve reference to defined - we need its name which lives there.
+ $name="Unknown Service"; $rdefined=Array();
+ if(read_row_expecting_just_one($rdefined,"defined","uuid",$rrunning["pointer_to_defined"])) {
+  $name=$rdefined["name"];
+  }
+ $pid=$rrunning["pid"];
+
+ $removing=false; $removing_info="";
+
+ if(posix_getpgid($pid)) {
+  posix_kill($pid,15);
+  sleep(2);
+  if(posix_getpgid($pid)) {
+   posix_kill($pid,9);
+   }
+  if(posix_getpgid($pid)) {
+   report_and_log_new_sql_txn(false,$name." not stopped - ".$pid." didn't respond to SIGINT or SIGKILL.","");
+   }else{
+   $removing=true; $removing_info=$name." stopped";
+   }
+  }else{
+  $removing=true; $removing_info=$pid." (".$name.") is not running anymore; removing PID from table.";
+  }
+
+ if($removing) {
+  $trash["uuid"]=guidv4();
+  $trash["pointer_to_defined"]=$rrunning["pointer_to_defined"];
+  $trash["localfile"]=$rrunning["localfile"];
+  $trash["rpmap"]=$rrunning["rpmap"];
+  delete_row_bypass_schema($in_target_table,"uuid",$in_target);
+  if(any_db_error()) { return false; }
+  insert_row("trashcan",$trash);
+  if(any_db_error()) { return false; }
+  report_and_log_new_sql_txn(true,$removing_info,"",false,"restart",$trash["uuid"]);
+  mbutton(BUTTONHTML_restart($trash["uuid"]));
+  } 
+
+ }
+
+
+function ROWMETHOD_stdout_running (
+ $in_table, $in_target, $in_target_table, $in_PARAMS,
+ $in_ini
+ ) {
+
+ # Resolve reference to running process.
+ $rrunning=Array();
+ if(!read_row_expecting_just_one($rrunning,$in_target_table,"uuid",$in_target)) { return false; }
+
+ # Running process also points to a defined process.
+ # Resolve that too...
+ $pdefined=$rrunning["pointer_to_defined"];
+ $rdefined=Array();
+ if(!read_row_expecting_just_one($rdefined,"defined","uuid",$pdefined)) { return false; }
+
+ # Defined process also points to a conf.
+ # We really need that.
+ $pconf=$rdefined["pointer_to_conf"];
+ $rconf=Array(); 
+ if(!read_row_expecting_just_one($rconf,"conf","uuid",$pconf)) { return false; }
+
+ # Assemble stdoutpath (path from config, filename from service definition).
+ $stdoutpath=path_merge(trim($rconf["stdoutfilepath"]),trim(make_filename_ready($rdefined["name"])."-stdout.txt"));
+
+ $GLOBALS["extra_goodies"].="<div class='stdout-top'>Last 50 lines of captured <tt>stdout</tt>:</div>\n";
+ $GLOBALS["extra_goodies"].="<textarea rows=25 class='stdout'>";
+ $GLOBALS["extra_goodies"].=tailCustom($stdoutpath,50);
+ $GLOBALS["extra_goodies"].="</textarea>";
+
+ return true;
+ }
+
+
+function ROWMETHOD_restart_trashcan (
+ $in_table, $in_target, $in_target_table, $in_PARAMS,
+ $in_ini
+ ) {
+ # Not invocable directly from the interface - but indirectly through buttons in
+ # the action history.
+
+ 
+ # Resolve reference to piece of trash.
+ $rpiece_of_trash=Array();
+ if(!read_row_expecting_just_one($rpiece_of_trash,$in_target_table,"uuid",$in_target)) { 
+  mnotice("Stopped process '".$in_target."' not found; it may have already been restarted or the history was cleared."); 
+  return false;
+  }
+ 
+ # Restarting a process from the trash - we're gonna use the same API that a
+ # POST request would.  So we'll supply the necessary data.
+ $fakePOST["running_pointer_to_defined"]=$rpiece_of_trash["pointer_to_defined"];
+ $fakePOST["running_localfile"]=$rpiece_of_trash["localfile"];
+ $fakePOST["running_rpmap"]=$rpiece_of_trash["rpmap"]; 
+ # $fakePOST["restart"] ...
+ # This is a "backchannel" to tell GENERATOR_pid() to output "restarted"
+ # instead of "started."
+ $fakePOST["restart"]="true";
+
+ $corpse=Array(); # ARRAY_IN_DATA() 
+
+ # look for buttons referring to this trash item.
+ $log_line=Array();
+ read_row_expecting_just_one($log_line,"log","button_type_target",$in_target);
+ if(any_db_error()) { return false; }
+ $log_line["button_type"]="restarted";
+ $log_line["button_type_target"]="none";
+ update_row("log",$log_line,"button_type_target",$in_target); 
+
+ # remove process (the piece of trash) from the trash
+ delete_row_bypass_schema($in_target_table,"uuid",$in_target,false);
+
+ # most of this is the same steps from the "new_row" action handler.
+ do {
+  # the "fill_data" fnctions will take data in $fakePOST[] and fill in
+  # $corpse[] ...
+  fill_data_array_from_query_string("running",$fakePOST,$corpse);
+  # GENERATOR_pid() for the corpse dispatched by the below call.
+  fill_data_array_from_app_generated_injourneys("running",$corpse,$fakePOST,$in_ini);
+   if(any_errors()) { break; }
+  # Corpse should be reanimated at this point.
+  set_report_names_for_insert("running",$corpse);
+  make_backrefs_for_new_row("running",$corpse);
+  if(any_db_error()) { return false; }
+  insert_row("running",$corpse);
+  if(any_db_error()) { return false; }
+  } while (false); 
+  return true;
+
+ }
+
+# ----------------------------------------------------------------------------
+# [ === BUTTONHTML functions ]
+# - Emit HTML to render button when one exists in the action history.
+#   Normally called by output_log().
+# ----------------------------------------------------------------------------
+
+function BUTTONHTML_restart($in_button_type_target) {
+ $outstr="\n <tr><td class='logbutton-container'><form action='".$GLOBALS["scriptname"]."' method=post>"
+        ."\n <input class='logbutton' type=submit value='Restart Process' />"
+        ."\n <input type='hidden' id='action' name='action' value='row_method_action' />"
+        ."\n <input type='hidden' id='row_method' name='row_method' value='restart' />"
+        ."\n <input type='hidden' id='table' name='table' value='trashcan' />"
+        ."\n <input type='hidden' id='target' name='target' value='".$in_button_type_target."' />"
+        ."\n <input type='hidden' id='return_to' name='return_to' value='running' />"
+        ."\n </form></td></tr>\n"
+	;
+ return $outstr;
+ }
+
+function BUTTONHTML_restarted($in_button_type_target) {
+ return "\n <tr><td class='logbutton-container'><p class='logbutton'>Restarted above</p></td></tr>\n";
+ }
+
+# ----------------------------------------------------------------------------
+# [ === BUTTONFALLOFF functions ]
+# - The action history only holds so many items. 
+#   When an item in the action history table ("log") is deleted, and that
+#   log entry has a button, this is called to provide an opportunity to clean
+#   it up.
+# - Note: When the entire log is cleared, "erase-upon-clear-log" can handle
+#   the cleanup for any tables referenced by buttons in the "log" table.
+# ----------------------------------------------------------------------------
+
+function BUTTONFALLOFF_restart($in_button_type_target) {
+ delete_row_bypass_schema("trashcan","uuid",$in_button_type_target,false);
+ }
+
+function BUTTONFALLOFF_restarted($in_button_type_target) {
+ delete_row_bypass_schema("trashcan","uuid",$in_button_type_target,false);
+ }
+
+
+# ----------------------------------------------------------------------------
+# [ === VALIDATOR functions ]
+# - Can be provided for any row_column combination.  Will be called when new
+#   row data is being validated.  Expected to return true (OK) or false (bad).
+# ----------------------------------------------------------------------------
+
+function VALIDATOR_defined_arguments ( $in_data ) {
+ $nbrackets=0; $firstflag=false;
+ $chopped=explode("{",$in_data);
+ foreach($chopped as $choppedmore) { 
+  if(!$firstflag) { $firstflag=true; continue; }
+  if(!str_contains($choppedmore,'}')) {
+   merr("Argument text is missing an ending '}'."); return false;
+   }
+  $to_bracket=explode('}',$choppedmore); $nbrackets++;
+  switch (trim(strtoupper($to_bracket[0]))) {
+   case "LOCALFILE":
+   case "URLPREFIX":
+   case "PORT":
+    break; 
+   case "";
+    merr("Argument text has a pair of brackets with nothing inbetween."); return false;
+    break;
+   default:
+    merr("Unknown substitutor '".$to_bracket[0]."'.");
+   } 
+  }
+ 
+ return true;
+ }
+
+
+# ----------------------------------------------------------------------------
+# == = = = = = = = = = = = = =  END CALLABLES = = = = = = = = = = = = = = = ==
+# ----------------------------------------------------------------------------
+
 
 ?>
