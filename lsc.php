@@ -44,6 +44,7 @@ set_globals($user,$hostname,$my_name);
 # - validate_action() will populate a default action if needed, including
 #   setting the action to 'uid-0-muzzle' if this happens to be running as
 #   root.
+# - "Action" is only recognized from POST, never GET.
 $ACTION=validate_action(@$_POST["action"]);
 
 # Get and validate "format" query string from HTTP request.
@@ -66,12 +67,14 @@ if($ACTION!="uid-0-muzzle") {
 # or $_POST[] later, and if it's not, then we handle that specially.
 $table="none";
 
-# If a session cookie is part of this request, connect to any current
-# session.  If unable to connect (session expired or previously invalidated),
-# or there is no session, then the action will be "no-auth" (unless it was
-# "login" - we let that through to allow login).
+# Variables to track session.
 $session=Array();
 $connected=false;
+
+# Incoming HTTP requests without session cookies force the action to be 
+# "no-auth" if the action isn't "login."  The action "no-auth" provides the
+# sign on form with a button that invokes the "login" action.
+# TODO: Handle API keys for non-HTTP formats
 if(!isset($_COOKIE["sid"])) {
  if($ACTION!=="login"){$ACTION="no-auth";} 
  }
@@ -80,9 +83,10 @@ if(!isset($_COOKIE["sid"])) {
 # Execute action.
 # Everything is centered around the database so any action will be in terms
 # of that database. Things that are not database operations must be expressed
-# as side effects in GENERATOR_ or ROWMETHOD_ functions.
-# The only exception made is "clear_log" which simply clears the action
-# history.
+# as side effects in GENERATOR_ or ROWMETHOD_ functions.  That code is toward
+# the end.
+# Exceptions are "clear_log" and other actions relating to users, sessions, 
+# and logins.
 # ----------------------------------------------------------------------------
 
 switch ($ACTION) {
@@ -92,7 +96,7 @@ switch ($ACTION) {
    find_and_sanitize_incoming($_POST,Array(),$P);
    is_table_known($P["table"]);
    if(any_errors()) { break; }
-  $ARRAY_IN_DATA=Array();
+  $ARRAY_IN_DATA=Array(); 
   fill_data_array_from_query_string($P["table"],$_POST,$ARRAY_IN_DATA);
    if(any_errors()) { break; }
   bounce_readonly($ACTION);
@@ -107,6 +111,7 @@ switch ($ACTION) {
    if(any_errors()) { break; }
   $connected=connect_session(@$_COOKIE["sid"],$session);
   if((!$connected) or any_errors()) { $ACTION="no-auth"; break; }
+   if(modify_action_for_redirect($ACTION,$session)) { break; }
   validate_data_array($P["table"],$ARRAY_IN_DATA);
    if(any_errors()) { break; }
   bounce_single_row_only($P["table"]);
@@ -152,6 +157,7 @@ switch ($ACTION) {
    if(any_errors()) { break; }
   $connected=connect_session(@$_COOKIE["sid"],$session);
   if((!$connected) or any_errors()) { $ACTION="no-auth"; break; }
+   if(modify_action_for_redirect($ACTION,$session)) { break; }
   $deleteable=set_report_names_for_delete($P["table"],$P["target"]);
    if(any_errors()) { break; }
    if(!$deleteable) { break; }
@@ -181,6 +187,7 @@ switch ($ACTION) {
    if(any_errors()) { break; }
   $connected=connect_session(@$_COOKIE["sid"],$session);
   if((!$connected) or any_errors()) { $ACTION="no-auth"; break; }
+   if(modify_action_for_redirect($ACTION,$session)) { break; }
   if($P["target_table"]==="optional") { $P["target_table"]=$P["table"]; }
   $GLOBALS["sqltxn_commit"]=true;
    # Row methods are responsible for clearing $GLOBALS["sqltx_commit"] if 
@@ -210,6 +217,7 @@ switch ($ACTION) {
    if(any_errors()) { break; }
   $connected=connect_session(@$_COOKIE["sid"],$session);
   if((!$connected) or any_errors()) { $ACTION="no-auth"; break; }
+   if(modify_action_for_redirect($ACTION,$session)) { break; }
   break;
  # ---------------------------------------------------------------------------
  case "clear_logs":
@@ -228,6 +236,7 @@ switch ($ACTION) {
    if(any_errors()) { break; }
   $connected=connect_session(@$_COOKIE["sid"],$session);
   if((!$connected) or any_errors()) { $ACTION="no-auth"; break; }
+   if(modify_action_for_redirect($ACTION,$session)) { break; }
   delete_all_rows_bypass_schema("log");
    if(any_errors()) { break; }
   do_erase_upon_clear_logs();
@@ -255,16 +264,87 @@ switch ($ACTION) {
    if(any_errors()) { break; }
   invalidate_session(@$_COOKIE["sid"]);
    if(any_errors()) { break; }
-  $for_uid=authenticate($P["username"],$P["password"]);
+  $userinfo=Array();
+  $for_uid=authenticate($P["username"],$P["password"],$userinfo);
    if($for_uid==="") { break; }
    if(any_errors()) { break; }
-  make_session($for_uid,$session);
+  $redirect="none";
+  if($userinfo["password_reset"]==1) { $redirect="password_reset"; }
+  make_session($for_uid,$session,$redirect);
    if(any_errors()) { break; }
   $session["appuser-uid"]=$P["username"];
   $GLOBALS["sqltxn_commit"]=true;
   report_and_log_new_sql_txn(true,"User ".$session["appuser-uid"]." logged in","");
   # Login successful at this point.
   $ACTION="show";
+   if(modify_action_for_redirect($ACTION,$session)) { break; }
+  break;
+ # ---------------------------------------------------------------------------
+ case "logout":
+ # ---------------------------------------------------------------------------
+  $P=Array("table"=>"none");
+   find_and_sanitize_incoming(Array(),$_GET,$P);
+   is_table_known($P["table"]);
+   if(any_errors()) { break; }
+  bounce_readonly($ACTION);
+   if(any_errors()) { break; }
+  $ini=Array(); $ini=ingest_ini($ini_file);
+   if(any_errors()) { break; }
+  open_database($ini["database"]["name"]);
+   if(any_errors()) { break; }
+  begin_sql_transaction();
+   if(any_errors()) { break; }
+  $connected=connect_session(@$_COOKIE["sid"],$session);
+  if((!$connected) or any_errors()) { $ACTION="no-auth"; break; }
+  invalidate_session($_COOKIE["sid"]);
+  $GLOBALS["sqltxn_commit"]=true;
+  report_and_log_new_sql_txn(true,"Thank you for using lsc.php!","");
+  # Logout successful at this point.
+  $ACTION="no-auth";
+  $session=Array();
+  break;
+ # ---------------------------------------------------------------------------
+ case "password_update":
+ # ---------------------------------------------------------------------------
+  $P=Array("table"=>"none","old_password"=>"","new_password"=>"");
+   find_and_sanitize_incoming(Array(),$_GET,$P);
+   is_table_known($P["table"]);
+   if(any_errors()) { break; }
+  bounce_readonly($ACTION);
+   if(any_errors()) { break; }
+  $ini=Array(); $ini=ingest_ini($ini_file);
+   if(any_errors()) { break; }
+  open_database($ini["database"]["name"]);
+   if(any_errors()) { break; }
+  begin_sql_transaction();
+   if(any_errors()) { break; }
+  $connected=connect_session(@$_COOKIE["sid"],$session);
+  if((!$connected) or any_errors()) { $ACTION="no-auth"; break; }
+  update_password($session,$P["old_password"],$P["new_password"]);
+   if(any_errors() { break; }
+  $GLOBALS["sqltxn_commit"]=true;
+  report_and_log_new_sql_txn(true,"Password updated successfully","");
+  # Logout successful at this point.
+  break;
+ # ---------------------------------------------------------------------------
+ case "password_reset":
+ case "appuser_manage":
+ # ---------------------------------------------------------------------------
+  $P=Array("table"=>"none");
+   find_and_sanitize_incoming(Array(),$_GET,$P);
+   is_table_known($P["table"]);
+   if(any_errors()) { break; }
+  bounce_readonly($ACTION);
+   if(any_errors()) { break; }
+  $ini=Array(); $ini=ingest_ini($ini_file);
+   if(any_errors()) { break; }
+  open_database($ini["database"]["name"]);
+   if(any_errors()) { break; }
+  begin_sql_transaction();
+   if(any_errors()) { break; }
+  $connected=connect_session(@$_COOKIE["sid"],$session);
+  if((!$connected) or any_errors()) { $ACTION="no-auth"; break; }
+   if(modify_action_for_redirect($ACTION,$session)) { break; }
   break;
  # ---------------------------------------------------------------------------
  case "disabled":
@@ -298,7 +378,7 @@ switch ($ACTION) {
 #   invoked - for "html" format this might display a usage page.
 # ----------------------------------------------------------------------------
 
-start_output($P["table"],$session);
+start_output($P["table"],$session,$ACTION);
 
 # Generate return link.
 $return_link=$my_name;
@@ -324,6 +404,7 @@ switch ($ACTION) {
    content_panel_end();
   history_panel_start();
   htmlout("<p class='return-link'><a href='".$return_link."'>[OK]</a></p>");
+  history_panel_end();
   break; 
  case "delete_row":
   content_panel_start($table,$ACTION);
@@ -331,6 +412,7 @@ switch ($ACTION) {
    content_panel_end();
   history_panel_start();
   htmlout("<p class='return-link'><a href='".$return_link."'>[OK]</a></p>");
+  history_panel_end();
   break; 
  case "row_method_actio":
  case "clear_logs":
@@ -339,6 +421,7 @@ switch ($ACTION) {
    content_panel_end();
   history_panel_start();
   htmlout("<p class='return-link'><a href='".$return_link."'>[OK]</a></p>");
+  history_panel_end();
   break; 
  case "show":
   if($table=="none") { null_request(); break; }
@@ -348,6 +431,7 @@ switch ($ACTION) {
     content_panel_end();
    history_panel_start();
    htmlout("<p class='return-link'><a href='".$my_name."'>[Home]</a></p>");
+   history_panel_end();
    break;
    }
   $rows=Array();
@@ -360,21 +444,33 @@ switch ($ACTION) {
    content_panel_end();
   history_panel_start();
   output_log($return_link);
+  history_panel_end();
+  break;
+ case "appuser_manage":
+  content_panel_start_full("none",$ACTION);
+   output_messages();
+   account_management_form($session);
+   content_panel_end();
+  break;
+ case "password_reset":
+  content_panel_start_full("none",$ACTION);
+   output_messages();
+   password_reset_form($session);
+   content_panel_end();
   break;
  case "no-auth":
-  content_panel_start("none",$ACTION);
+  content_panel_start_full("none",$ACTION);
    output_messages();
    login_form();
    content_panel_end();
-  history_panel_start();
   break;
  default:
   content_panel_start($table,$ACTION);
    output_messages();
    content_panel_end();
   history_panel_start();
+  history_panel_end();
  }
-history_panel_end();
 
 # Output any generated Javascript.
 # - Javascript is used to populate default values in form fields when the
@@ -433,6 +529,7 @@ exit;
 
 # Section Index:
 # - Authentication and session handling
+# - Account management
 # - Null request handler
 # - Row method handling functions
 # - Section output start and stop
@@ -460,12 +557,19 @@ exit;
 # ----------------------------------------------------------------------------
 
 
-function authenticate($in_username,$in_password) {
+function authenticate($in_username,$in_password,&$out_userinfo) {
 # Returns UID (account number) if provided password authenticates.
 # Otherwise returns null.
+# Returns other attributes in $out_userinfo associative array.
+# - Currently this is just "password_reset", which will be 1 if the
+#   password needs to be reset on next login.
 
  if($in_password===""){return "";}
  if($in_username===""){return "";}
+
+ $need_to_update_user_record=false;
+
+ $accepted=false;
 
  $existing_appuser=Array();
  $result=read_row_expecting_just_one($existing_appuser,"appusers","username",$in_username);
@@ -473,29 +577,55 @@ function authenticate($in_username,$in_password) {
   merr("Unable to read appusers table. Logins cannot be processed at this time.");
   return "";
   }
- if($result===false) {
-  mnotice("Username and/or password does not match records.");
+ do {
+  if($result===false) { break; }
+  if(hash("sha512",$in_password)!==$existing_appuser["password"]) { break; }
+  if($existing_appuser["enabled"]!=1) { break; }
+  $accepted=true;
+  } while (false);
+ if(!$accepted) { 
+  mnotice("Login not accepted. This can happen if the username is wrong, password is wrong, or the account is disabled.");
   return "";
   }
- if(hash("sha512",$in_password)!==$existing_appuser["password"]) {
-  mnotice("Username and/or password does not match records.");
-  return "";
+
+ # If the uid in the appuser table is "new_superuser", the database is new and
+ # this would be the admin logging in for the first time.
+ if($existing_appuser["uid"]==="new_superuser") {
+  $need_to_update_user_record=true;
+  $new_superuser_uid=guidv4();
+   $existing_appuser["uid"]=$new_superuser_uid;
+   $changed_rows["superuser_uid"]=$new_superuser_uid;
+  update_row("internal",$changed_rows,"rowid",1);
+  if(any_db_error()) {
+   merr("Unable to update internal table. Logins cannot be procesed at this time.");
+   return "";
+   }
   }
+
+ if($need_to_update_user_record) {
+  update_row("appusers",$existing_appuser,"username",$in_username);
+  if(any_db_error()) {
+   merr("Unable to update appusers table. Logins cannot be procesed at this time.");
+   return "";
+   } 
+  }
+
+ $out_userinfo["password_reset"]=$existing_appuser["password_reset"];
  return $existing_appuser["uid"];
  }
 
 
-function make_session($in_uid,&$session) {
+function make_session($in_uid,&$session,$in_redirect="none") {
 # Creates a new session for the given UID.
 # Assumes UID has been authenticated through authenticate().
-# CREATE TABLE sessions (sid TEXT NOT NULL PRIMARY KEY, uid TEXT NOT NULL, created TEXT NOT NULL)
+# CREATE TABLE sessions (sid TEXT NOT NULL PRIMARY KEY, uid TEXT NOT NULL, created TEXT NOT NULL, redirect TEXT NOT NULL)
 
  $existing_sessions=read_table_filtered_rows("sessions","uid",$in_uid);
  if(count($existing_sessions)>4) {
   merr("You have too many active sessions. Please log out of an existing session to start a new one, or wait for the oldest to expire.");
   return; 
   }
- $new_session=Array("uid"=>$in_uid,"sid"=>guidv4(),"created"=>time());
+ $new_session=Array("uid"=>$in_uid,"sid"=>guidv4(),"created"=>time(),"redirect"=>$in_redirect);
  insert_row("sessions",$new_session); 
  if(any_db_error()) { 
   merr("Unable to create a new session.");
@@ -505,8 +635,11 @@ function make_session($in_uid,&$session) {
 
  $session["sid"]=$new_session["sid"];
  $session["uid"]=$new_session["uid"];
+ $session["created"]=$new_session["created"];
+ $session["redirect"]=$new_session["redirect"];
 
  }
+
 
 function connect_session($in_cookie_sid,&$session) {
 # Checks if session exists, and if it does, if its valid.
@@ -519,7 +652,7 @@ function connect_session($in_cookie_sid,&$session) {
   return;
   }
  if($result===false) {
-  mnotice("Session not found.");
+  mnotice("Session expired. Log in again.");
   invalidate_session($in_cookie_sid);
   return false;
   }
@@ -543,6 +676,7 @@ function connect_session($in_cookie_sid,&$session) {
 
  $session["sid"]=$existing_session["sid"];
  $session["uid"]=$existing_session["uid"];
+ $session["redirect"]=$existing_session["redirect"];
  # populate session associative array with data from user table.
  $session["appuser-uid"]=$existing_user["username"];
 
@@ -556,6 +690,63 @@ function invalidate_session($in_cookie_sid) {
   merr("Unable to delete session.");
   return;
   }
+ }
+
+
+function modify_action_for_redirect(&$in_ACTION,$in_session) {
+ if(!(isset($in_session["redirect"]))) {
+  return false;
+  }
+ if($in_session["redirect"]==="none") {
+  return false;
+  }
+ if($in_session["redirect"]==="password_reset") { 
+  $in_ACTION="password_reset"; return true;
+  }
+ }
+
+
+# ----------------------------------------------------------------------------
+# [ Account management ]
+# ----------------------------------------------------------------------------
+
+
+function update_password(&$session, $in_old_password, $in_new_password) {
+ $existing_appuser=Array();
+ $result=read_row_expecting_just_one($existing_appuser,"appusers","uid",$in_uid);
+ if(any_db_error()) { 
+  merr("Unable to read appusers table.  Account updates cannot be processed at this time.");
+  return "";
+  }
+
+ $accepted=false;
+ $other_issue=false:
+
+ do {
+  if($result===false) { 
+   $other_issue=true;
+   break;
+   }
+  if(hash("sha512",$in_old_password)!==$existing_appuser["password"]) { break; }
+  if($existing_appuser["enabled"]!=1) {
+   $other_issue=true;
+   break;
+   }
+  $accepted=true;
+  } while (false);
+
+ if(!$accepted) { 
+  if($other_issue) {
+   merr("Your account was removed or disabled while you were resetting the password.");
+   invalidate_session(@$session["sid"]);
+  } else {
+   mnotice("Old password doesn't match records. Password was not reset.");
+   }
+  return;
+  }
+
+ $existing_appuser["password"]=hash("sha512",$in_new_password);
+
  }
 
 
@@ -645,7 +836,7 @@ function row_method_action(
 # ----------------------------------------------------------------------------
 
 
-function start_output($in_table,$session) {
+function start_output($in_table,$session,$in_action) {
 # Begin generating output.
 # - For HTML, we'll start the html, body, and main tags, and take care of the
 #   head element as well.
@@ -666,10 +857,31 @@ function start_output($in_table,$session) {
    htmlout("<body>");
    htmlout("<main>");
    htmlout("<div id='app-header'>");
+
    htmloutp("<table><tr><td><h2>lsc</h2></td>");
+
    if(isset($session["uid"])) { 
-    htmloutp("<td style='text-align: center'>".$session["appuser-uid"]."</td>");
+    htmloutp("<td rowspan=2 class='appuser-container'><p class='appuser-container'>".$session["appuser-uid"])."</p>";
+    htmloutp("<p class='appuser-container'>");
+
+    htmloutp("<form action='".$GLOBALS["scriptname"]."' method=post>");
+    htmloutp("<input type='hidden' id='action' name='action' value='appuser_manage'>");
+    htmloutp("<button class='appuser-button'");
+    if($in_action=="appuser_manage") { htmloutp(" disabled "); }
+    htmloutp("> Account </button>");
+    htmloutp("</form>");
+    htmloutp(" "); 
+    htmloutp("<form action='".$GLOBALS["scriptname"]."' method=post>");
+    htmloutp("<input type='hidden' id='action' name='action' value='logout'>");
+    htmloutp("<button class='appuser-button'> Log Out </button></p>");
+    htmloutp("</form>");
+    htmloutp("</td>");
+    } else { 
+    htmloutp("<td rowspan=2 style='text-align: center'><p> Please Log In </p>");
+    htmloutp("<p> </p>");
+    htmloutp("</td>");
     }
+
    htmloutp("<td><h2 style='text-align: right'>".$GLOBALS["username"]."@".$GLOBALS["hostname"]."</span></h2></td></tr></table>",1);
    htmlout("<table>");
 
@@ -758,6 +970,16 @@ function content_panel_start($in_which_table,$in_action) {
   content_top($table_metadata);
   }
  }
+function content_panel_start_full($in_which_table,$in_action) {
+ if($GLOBALS["output_format"]!=="html") { return; } # HTML format only.
+ htmlout("<div style='border-style: solid; border-width: 4px; border-color: white; width: 70%; padding-left: 15%; padding-right: 15%; padding-bottom: 7.5%; padding-top: 3.25%; margin-left: -4px; float: left; background-color: lightgrey;'>");
+ if($in_which_table==="none") { 
+  return;
+ } else {
+  $table_metadata=schema_rowattr($in_which_table.'/FOR_THIS_APP');
+  content_top($table_metadata);
+  }
+ }
 function content_panel_end() {
  if($GLOBALS["output_format"]!=="html") { return; } # HTML format only.
  htmlout("</div>");
@@ -839,6 +1061,65 @@ function finish_output() {
 #   kinda tacked on. ]
 # ----------------------------------------------------------------------------
 
+
+function account_management_form($session) { 
+# Output account management form.
+ if($GLOBALS["output_format"]!=="html") { return; } # HTML format only.
+ if(!isset($session["appuser-uid"])) { 
+  htmlout("<p>Please log in again to manage your account.</p>");
+  return;
+  }
+
+  htmlout("<form action='".$GLOBALS["scriptname"]."' method=post>");
+  htmlout("<input type='hidden' id='action' name='action' value='appuser_update' />");
+  output_table_noneditable_container_start();
+  htmlout("<caption class='form-top'>Account Management (".$session["appuser-uid"].")</caption>");
+  htmlout("<tr>\n");
+  htmlout("<td class='form-column-header'><label for='reset_password'>Reset Password On Next Login</label</td>");
+  htmlout("<td class='form-column-data'><input style='width: 98%;' type='checkbox' id='reset_password' name='reset_password' /></td>");
+  output_table_noneditable_container_end();
+  htmlout("</br>");
+  output_table_noneditable_container_start();
+  htmlout("<td class='form-column-header'><label for='reset_password'>Log Out All Other Sessions</label</td>");
+  htmlout("<td class='form-column-data'><input style='width: 98%;' type='checkbox' id='kill_sessions' name='' /></td>");
+  output_table_noneditable_container_end();
+  htmlout("</br>");
+  output_table_noneditable_container_start();
+  htmlout("<td class='form-column-header'><label for='reset_password'>Disable Account</label</td>");
+  htmlout("<td class='form-column-data'><input style='width: 98%;' type='checkbox' id='disable_account' name='disable_account' /></td>");
+  htmlout("</tr>");
+  output_table_noneditable_container_end();
+  htmlout("</br>");
+  output_table_noneditable_container_start();
+  htmlout("<tr><td colspan=2 class='rowmethod-container'><button class='rowmethod-button'>Proceed</button></td></tr>");
+  output_table_noneditable_container_end();
+
+ }
+
+function password_reset_form($session) {
+# Password reset form.
+ if($GLOBALS["output_format"]!=="html") { return; } # HTML format only.
+ if(!isset($session["appuser-uid"])) { 
+  htmlout("<p>Please log in with your old or temporary password to manage your account.</p>");
+  return;
+  }
+
+  htmlout("<form action='".$GLOBALS["scriptname"]."' method=post>");
+  htmlout("<input type='hidden' id='action' name='action' value='password_update' />");
+  output_table_noneditable_container_start();
+  htmlout("<caption class='form-top'>Reset password to continue</caption>");
+  htmlout("<tr>\n");
+  htmlout("<td class='form-column-header'><label for='old_password'>Current Password</label</td>");
+  htmlout("<td class='form-column-data'><input style='width: 98%;' type='text' id='old_password' name='old_password' /></td>");
+  htmlout("</tr>\n");
+  htmlout("<tr>\n");
+  htmlout("<td class='form-column-header'><label for='new_password'>New Password</label</td>");
+  htmlout("<td class='form-column-data'><input style='width: 98%;' type='text' id='new_password' name='new_password' /></td>");
+  htmlout("</tr>\n");
+  htmlout("<tr><td colspan=2 class='rowmethod-container'><button class='rowmethod-button'>Reset Password</button></td></tr>");
+  output_table_noneditable_container_end();
+
+ }
 
 function login_form() {
 # Output login form
@@ -2285,11 +2566,11 @@ function open_database($in_filename) {
  # will be ignored.
  mtrace("DB op: open_database($in_filename)");
  $nonschema_table_sql=Array(
-  "internal"	=>"CREATE TABLE internal (nlog INTEGER NOT NULL, lockedwithkey TEXT);",
+  "internal"	=>"CREATE TABLE internal (nlog INTEGER NOT NULL, superuser_uid TEXT NOT NULL);",
   "log"		=>"CREATE TABLE log (id INTEGER NOT NULL PRIMARY KEY, source TEXT NOT NULL, eventdesc TEXT NOT NULL, event TEXT NOT NULL, timestamp TEXT NOT NULL, offer_event_view TEXT NOT NULL, button_type TEXT NOT NULL, button_type_target TEXT NOT NULL);",
   "backref"	=>"CREATE TABLE backref (id INTEGER NOT NULL PRIMARY KEY, to_table TEXT NOT NULL, to_key_col_name TEXT NOT NULL, to_key_col_value TEXT_NOT_NULL, from_table TEXT NOT NULL, from_key_col_name TEXT NOT NULL, from_key_col_value TEXT NOT NULL);",
-  "sessions"	=>"CREATE TABLE sessions (sid TEXT NOT NULL PRIMARY KEY, uid TEXT NOT NULL, created TEXT NOT NULL);",
-  "appusers"	=>"CREATE TABLE appusers (uid TEXT NOT NULL PRIMARY KEY, username TEXT NOT NULL, password TEXT NOT NULL, created TEXT NOT NULL);"
+  "sessions"	=>"CREATE TABLE sessions (sid TEXT NOT NULL PRIMARY KEY, uid TEXT NOT NULL, created TEXT NOT NULL, redirect TEXT NOT NULL);",
+  "appusers"	=>"CREATE TABLE appusers (uid TEXT NOT NULL PRIMARY KEY, username TEXT NOT NULL, password TEXT NOT NULL, created TEXT NOT NULL, password_reset INTEGER NOT NULL, enabled INTEGER NOT NULL);"
  );
   
  $GLOBALS["dbo"]=new SQLite3($in_filename);
@@ -2305,6 +2586,12 @@ function open_database($in_filename) {
   $required_tables[]=$nonschema_table_name;
   }
 
+ # turn our list into an associative array.
+ $found_tables=Array();
+ foreach($required_tables as $required_table) {
+  $found_table[$required_table]=false;
+  };
+
  # Now, let's look at the database and see what's missing.
  $missing_tables=array();
  $sql="SELECT * FROM sqlite_master WHERE type='table'";
@@ -2312,40 +2599,36 @@ function open_database($in_filename) {
  $statement=$GLOBALS["dbo"]->prepare($sql);
  $results=$statement->execute();
 
- foreach($required_tables as $required_table) {
-  $found=false;
-  while($row=$results->fetchArray()){
-   if(($row["name"]===$required_table)){ $found=true; break; }
-   }
-  if(!$found) {
-   mtrace("database is missing table \"$required_table\", going to add");
-   $missing_tables[]=$required_table;
-   };
+ while($row=$results->fetchArray()){
+  if(in_array($row["name"],$required_tables)) { $found_table[$row["name"]]=true; continue; }
   }
 
  $init_internal_table=false;
  $init_appusers_table=false;
 
  # Now, create any missing tables if needed.
- if(count($missing_tables)>0) {
-  begin_sql_transaction(); 
-  foreach($missing_tables as $missing_table) {
-   if(isset($nonschema_table_sql[$missing_table])) {
-    $sql=$nonschema_table_sql[$missing_table];
-   }else{
-    $sql=sql_to_make_table_from_schemadef($missing_table);
-    mtrace("sql: \"$sql\"");
-    }
-   if($missing_table==="internal") { $init_internal_table=true; }
-   if($missing_table==="appusers") { $init_appusers_table=true; }
-   $result=$GLOBALS["dbo"]->exec($sql);
-    if(any_db_error()) { end_any_sql_transaction(); return; }
+ $txn_needed=false;
+ foreach($found_table as $missing_table=>$it_was_found_earlier) {
+   if ($it_was_found_earlier) { continue; }
+   # Only start a transaction if we have a table to make
+   if (!$txn_needed) { $txn_needed=true; begin_sql_transaction(); }
+   mtrace("database is missing table \"".$missing_table."\", going to add");
+  if(isset($nonschema_table_sql[$missing_table])) {
+   $sql=$nonschema_table_sql[$missing_table];
+  }else{
+   $sql=sql_to_make_table_from_schemadef($missing_table);
+   mtrace("sql: \"$sql\"");
    }
+  if($missing_table==="internal") { $init_internal_table=true; }
+  if($missing_table==="appusers") { $init_appusers_table=true; }
+  $result=$GLOBALS["dbo"]->exec($sql);
+   if(any_db_error()) { end_any_sql_transaction(); return; }
+  }
 
   # Initialize the internal table if needed.
   if($init_internal_table) {
    mtrace("initializing internal table");
-   $init_data=Array("nlog"=>0);
+   $init_data=Array("nlog"=>0,"superuser_uid"=>"unassigned");
    insert_row("internal",$init_data);
     if(any_db_error()) { end_any_sql_transaction(); return; }
    log_entry("app","database created","A new, empty database has been created.");
@@ -2355,18 +2638,23 @@ function open_database($in_filename) {
   # Initialize the users table if needed.
   if($init_appusers_table) { 
    mtrace("initializing users table");
-   $init_data=Array("uid"=>guidv4(),"username"=>"admin","password"=>hash("sha512","admin"),"created"=>time());
+   $init_data=Array("uid"=>"new_superuser","username"=>"admin","password"=>hash("sha512","admin"),"created"=>time(),"password_reset"=>1,"enabled"=>1);
+   # NOTE: The uid value "new_superuser" will trigger authenticate() to
+   # create a new uid, and set internal.superuser_uid and this uid to it.
    insert_row("appusers",$init_data);
     if(any_db_error()) { end_any_sql_transaction(); return; }
    log_entry("app","user table initialized","New user table with default admin account created.");
     if(any_db_error()) { end_any_sql_transaction(); return; }
    }
 
+ # $txn_needed not set if we didn't start a new sql transaction above.
+ # ... not set if no missing tables.
+ if($txn_needed) {
   $GLOBALS["sqltxn_commit"]=true; # successful at this point.
   end_any_sql_transaction(); 
   } else {
-   mtrace("no missing tables");
-  }
+  mtrace("no missing tables");
+ }
 
  }
 
@@ -3151,6 +3439,8 @@ function mtrace($in_msg_text,$in_flags="") {
   } else {
   $GLOBALS["outmsgs"]["trace"][]="[".$in_flags."] ".$in_msg_text;
   }
+ #echo "<p>mtrace: $in_msg_text</p>";
+ # echo "<p>mtrace: $in_msg_text</p>";
  }
 
 
@@ -3376,6 +3666,9 @@ function style_sheet() {
  htmlout(".tablinks { background-color: lightgrey; border: solid; border-width: 1px; margin: 2px 2px 2px 2px; width: 40%; }");
  htmlout(".tablinks:active { color: white; }");
  htmlout(".tablinks.active { background-color: white; }");
+ htmlout(".appuser-container { padding: 1px; margin: 1px; text-align: center; darkgrey; color: black; }");
+ htmlout(".appuser-button { font-size: 0.9rem; width: 100px; color: darkblue; background-color: lightgrey; border: solid; border-width: 1px; border-color: darkgrey; margin: 0px 0px 0px 0px; }");
+ htmlout(".appuser-button:active { color: white; }");
  htmlout(".logbutton-container { padding: 1px; margin: 1px; text-align: right; background-color: blue; color: darkgrey; }");
 
  htmlout(".logbutton { font-size: 1rem; background-color: lightgrey; border: solid; border-width: 1px; margin: 2px 2px 2px 2px; }");
@@ -3503,20 +3796,20 @@ $GLOBALS["schemadef"]=Array(
 				                    '/display-using-other-table/display-sql-SELECT:number,urlprefix/display-sql-FROM:rpmap/display-sql-WHERE:number/display-sql-IS:rpmap',
  'running/lastchecked'	    	=>  'req:n/type:str/data:date/minlen:   0/maxlen:       0/injourney:row-method/form-label:Last Checked',
  # ---------------------------------------------------------------------------
- 'maint/FOR_THIS_APP'	    	=>  'title:Maintenance Command Requests'
-				                   .'/new-form-title:			    Maintenance Request'
-			                	   .'/allow-delete-by:			    uuid'
-			                	   .'/single-row-only'
-		            	    	   .'/single-row-only-empty-message:No active maintenance request.'
-			                	   .'/friendly-object-name:		    maintenance request'
-			                	   .'/instance-friendly-name-is:	request'
-		            	    	   .'/each-row-method:execute,Execute maintenance request,uuid'
-		            	    	   .'/toplink:				        MR'
-			                	   ,
- 'maint/uuid'	       	    	=>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:MRN',
- 'maint/request'	        	=>  'req:y/type:str/data:name/minlen:   1/maxlen:      64/injourney:user-selects-from-this-list/form-label:Action/this-list:deldb=Delete Database',
- 'maint/mkey'		         	=>  'req:y/type:str/data:name/minlen:  16/maxlen:    256/injourney:user-enters-text/form-label:Enter A Confirmation Password'.
-				                    '/is-confirmation-key-for:execute/confirmation-placeholder:Enter Confirmation Password',
+# 'maint/FOR_THIS_APP'	    	=>  'title:Maintenance Command Requests'
+#				                   .'/new-form-title:			    Maintenance Request'
+#			                	   .'/allow-delete-by:			    uuid'
+#			                	   .'/single-row-only'
+#		            	    	   .'/single-row-only-empty-message:No active maintenance request.'
+#			                	   .'/friendly-object-name:		    maintenance request'
+#			                	   .'/instance-friendly-name-is:	request'
+#		            	    	   .'/each-row-method:execute,Execute maintenance request,uuid'
+#		            	    	   .'/toplink:				        MR'
+#			                	   ,
+# 'maint/uuid'	       	    	=>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:MRN',
+# 'maint/request'	        	=>  'req:y/type:str/data:name/minlen:   1/maxlen:      64/injourney:user-selects-from-this-list/form-label:Action/this-list:deldb=Delete Database',
+# 'maint/mkey'		         	=>  'req:y/type:str/data:name/minlen:  16/maxlen:    256/injourney:user-enters-text/form-label:Enter A Confirmation Password'.
+#				                    '/is-confirmation-key-for:execute/confirmation-placeholder:Enter Confirmation Password',
  # ---------------------------------------------------------------------------
  'trashcan/FOR_THIS_APP'	    =>  'title:Recycle Bin'
 			                	   .'/allow-delete-by:			    uuid'
@@ -3731,45 +4024,45 @@ function GENERATOR_pid (
 # - Row methods are specified in a table's FOR_THIS_APP virtual column.
 # ----------------------------------------------------------------------------
 
-function ROWMETHOD_execute_maint(
- $in_table, $in_target, $in_target_table, $in_PARAMS, $in_ini
- ) {
-
- # Resolve reference to maintenance request
- $rrequest=Array();
- if(!read_row_expecting_just_one($rrequest,$in_table,"uuid",$in_target)) { return false; }
-
- # Check if keys match, bounce if they don't.
- if($in_PARAMS["mkey"]!==$rrequest["mkey"]) {
-  merr("Confirmation key is wrong.  The request was not executed.");
-  mnotice("If you forgot the confirmation key, delete your request and try again.");
-  return false; 
-  }
-
- $not_implemented=false; $close=false;
- switch ($rrequest["request"]) {
-  case "deldb":
-   # TODO: Actually do this.
-   # mnotice("Database deleted.  It will be automatically recreated the next time the app is accessed.");
-   $not_implemented=true;
-   $close=true;
-   break;
-  default:
-   merr("Unrecognized request '".$rrequest["request"]."'.  The request was not executed.","hack");
-   $close=false;
-  }
-
- if($not_implemented) {
-  mnotice("'".$rrequest["request"]."' isn't implemented yet.  Nothing was done.");
-  }
-
- if($close) {
-  delete_row_bypass_schema($in_table,"uuid",$in_target);
-  if(any_db_error()) { return false; }
-  mnotice("closing request '".make_presentable($rrequest["uuid"],"uuid")."'.");
-  }
-
- }
+#function ROWMETHOD_execute_maint(
+# $in_table, $in_target, $in_target_table, $in_PARAMS, $in_ini
+# ) {
+#
+# # Resolve reference to maintenance request
+# $rrequest=Array();
+# if(!read_row_expecting_just_one($rrequest,$in_table,"uuid",$in_target)) { return false; }
+#
+# # Check if keys match, bounce if they don't.
+# if($in_PARAMS["mkey"]!==$rrequest["mkey"]) {
+#  merr("Confirmation key is wrong.  The request was not executed.");
+#  mnotice("If you forgot the confirmation key, delete your request and try again.");
+#  return false; 
+#  }
+#
+# $not_implemented=false; $close=false;
+# switch ($rrequest["request"]) {
+#  case "deldb":
+#   # TODO: Actually do this.
+#   # mnotice("Database deleted.  It will be automatically recreated the next time the app is accessed.");
+#   $not_implemented=true;
+#   $close=true;
+#   break;
+#  default:
+#   merr("Unrecognized request '".$rrequest["request"]."'.  The request was not executed.","hack");
+#   $close=false;
+#  }
+#
+# if($not_implemented) {
+#  mnotice("'".$rrequest["request"]."' isn't implemented yet.  Nothing was done.");
+#  }
+#
+# if($close) {
+#  delete_row_bypass_schema($in_table,"uuid",$in_target);
+#  if(any_db_error()) { return false; }
+#  mnotice("closing request '".make_presentable($rrequest["uuid"],"uuid")."'.");
+#  }
+#
+# }
 
 
 function ROWMETHOD_check_running( 
