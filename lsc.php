@@ -307,7 +307,7 @@ switch ($ACTION) {
  case "password_update":
  # ---------------------------------------------------------------------------
   $P=Array("table"=>"none","old_password"=>"","new_password"=>"");
-   find_and_sanitize_incoming(Array(),$_GET,$P);
+   find_and_sanitize_incoming($_POST,Array(),$P);
    is_table_known($P["table"]);
    if(any_errors()) { break; }
   bounce_readonly($ACTION);
@@ -320,8 +320,9 @@ switch ($ACTION) {
    if(any_errors()) { break; }
   $connected=connect_session(@$_COOKIE["sid"],$session);
   if((!$connected) or any_errors()) { $ACTION="no-auth"; break; }
-  update_password($session,$P["old_password"],$P["new_password"]);
-   if(any_errors() { break; }
+  $successful=update_password($session,$P["old_password"],$P["new_password"]);
+   if(!$successful) { break; }
+   if(any_errors()) { break; }
   $GLOBALS["sqltxn_commit"]=true;
   report_and_log_new_sql_txn(true,"Password updated successfully","");
   # Logout successful at this point.
@@ -447,6 +448,7 @@ switch ($ACTION) {
   history_panel_end();
   break;
  case "appuser_manage":
+  open_database_2($ini["database"]["name"]);
   content_panel_start_full("none",$ACTION);
    output_messages();
    account_management_form($session);
@@ -670,7 +672,7 @@ function connect_session($in_cookie_sid,&$session) {
   return;
   }
  if($result===false) {
-  mnotice("The user for this session doesn't exist. This could happen if the user account was deleted before the user logged out.");
+  mnotice("Your account was removed or disabled.");
   return;
   }
 
@@ -711,16 +713,20 @@ function modify_action_for_redirect(&$in_ACTION,$in_session) {
 # ----------------------------------------------------------------------------
 
 
+function update_account(&$session,$in_array_data) {
+ }
+
+
 function update_password(&$session, $in_old_password, $in_new_password) {
  $existing_appuser=Array();
- $result=read_row_expecting_just_one($existing_appuser,"appusers","uid",$in_uid);
+ $result=read_row_expecting_just_one($existing_appuser,"appusers","uid",$session["uid"]);
  if(any_db_error()) { 
-  merr("Unable to read appusers table.  Account updates cannot be processed at this time.");
-  return "";
+  merr("Unable to read appusers table. Account updates cannot be processed at this time.");
+  return false;
   }
 
  $accepted=false;
- $other_issue=false:
+ $other_issue=false;
 
  do {
   if($result===false) { 
@@ -737,16 +743,29 @@ function update_password(&$session, $in_old_password, $in_new_password) {
 
  if(!$accepted) { 
   if($other_issue) {
-   merr("Your account was removed or disabled while you were resetting the password.");
+   merr("Your account was removed or disabled while you were resetting the password. Password was not reset (assuming your account still exists).");
    invalidate_session(@$session["sid"]);
   } else {
    mnotice("Old password doesn't match records. Password was not reset.");
    }
-  return;
+  return false;
   }
 
  $existing_appuser["password"]=hash("sha512",$in_new_password);
+ $existing_appuser["password_reset"]=0;
+ update_row("appusers",$existing_appuser,"uid",$session["uid"]);
+ if(any_db_error()) {
+  merr("Unable to update appusers table. Account updates cannot be processed at this time. Whe you try later, if the new password doesn't work try the old one.");
+  return false;
+  }
+ $data_to_change["redirect"]="none";
+ update_row("sessions",$data_to_change,"sid",$session["sid"]);
+ if(any_db_error()) {
+  merr("Unable to update sessions table. Account updates cannot be processed at this time. When you try later, if the new password doesn't work try the old one.");
+  return false;
+  }
 
+ return true;
  }
 
 
@@ -1070,28 +1089,54 @@ function account_management_form($session) {
   return;
   }
 
+ $sql2="SELECT * FROM appusers WHERE uid = '".$session["uid"]."'";
+ $statement2=$GLOBALS["dbo2"]->prepare($sql2);
+ $results2=$statement2->execute();
+ $row2=$results2->fetchArray(SQLITE3_ASSOC);
+ if ((is_bool($row2)) and (!$row2)) {
+  htmlout("<p>User record not found.</p>");
+  return;
+  }
+ $userinfo=$row2;
+ $sql2="SELECT * FROM sessions WHERE uid = '".$session["uid"]."'";
+ $statement2=$GLOBALS["dbo2"]->prepare($sql2);
+ $results2=$statement2->execute();
+ $session_list=Array();
+ while($row=$results2->fetchArray(SQLITE3_ASSOC)) { $session_list[]=$row; };
+
   htmlout("<form action='".$GLOBALS["scriptname"]."' method=post>");
   htmlout("<input type='hidden' id='action' name='action' value='appuser_update' />");
   output_table_noneditable_container_start();
   htmlout("<caption class='form-top'>Account Management (".$session["appuser-uid"].")</caption>");
+
+  htmlout("<tr><td colspan=6>Created: ".timestamp_to_string($userinfo["created"])."</td></tr>");
+  htmlout("<tr><td colspan=6>UID: ".$userinfo["uid"]."</td></tr>");
+
+  output_table_noneditable_container_end();
+  htmlout("<br \>");
+  output_table_noneditable_container_start();
+ 
+  htmlout("<tr><td colspan=6>".count($session_list)." active session(s)</td></tr>");
+  htmlout("<tr><td colspan=6><table>");
+  foreach($session_list as $session_in_list) {
+   htmloutp("<tr><td>- ".timestamp_to_string($session_in_list["created"]));
+   if($session_in_list["sid"]===$session["sid"]) { htmloutp(" (this session)"); }
+   htmloutp("</td></tr>",1); 
+   }
+  htmlout("</table></td></tr>");
+  output_table_noneditable_container_end();
+  htmlout("<br \>");
+  output_table_noneditable_container_start();
+
   htmlout("<tr>\n");
-  htmlout("<td class='form-column-header'><label for='reset_password'>Reset Password On Next Login</label</td>");
-  htmlout("<td class='form-column-data'><input style='width: 98%;' type='checkbox' id='reset_password' name='reset_password' /></td>");
-  output_table_noneditable_container_end();
-  htmlout("</br>");
-  output_table_noneditable_container_start();
-  htmlout("<td class='form-column-header'><label for='reset_password'>Log Out All Other Sessions</label</td>");
-  htmlout("<td class='form-column-data'><input style='width: 98%;' type='checkbox' id='kill_sessions' name='' /></td>");
-  output_table_noneditable_container_end();
-  htmlout("</br>");
-  output_table_noneditable_container_start();
-  htmlout("<td class='form-column-header'><label for='reset_password'>Disable Account</label</td>");
-  htmlout("<td class='form-column-data'><input style='width: 98%;' type='checkbox' id='disable_account' name='disable_account' /></td>");
+  htmlout("<td class='form-column-header'><label for='reset_password'>Reset Password On Next Login</label></td>");
+  htmlout("<td><input style='width: 98%;' type='checkbox' id='reset_password' name='reset_password' /></td>");
+  htmlout("<td class='form-column-header'><label for='reset_password'>Log Out All Other Sessions</label></td>");
+  htmlout("<td><input style='width: 98%;' type='checkbox' id='kill_sessions' name='' /></td>");
+  htmlout("<td class='form-column-header'><label for='reset_password'>Disable Account</label></td>");
+  htmlout("<td><input style='width: 98%;' type='checkbox' id='disable_account' name='disable_account' /></td>");
   htmlout("</tr>");
-  output_table_noneditable_container_end();
-  htmlout("</br>");
-  output_table_noneditable_container_start();
-  htmlout("<tr><td colspan=2 class='rowmethod-container'><button class='rowmethod-button'>Proceed</button></td></tr>");
+  htmlout("<tr><td colspan=6 class='rowmethod-container'><button class='rowmethod-button'>Proceed</button></td></tr>");
   output_table_noneditable_container_end();
 
  }
