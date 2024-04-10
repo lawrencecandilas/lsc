@@ -1,0 +1,16 @@
+* Get user creation and user deletion logic into their own functions - e.g. add_user() and delete_user()
+* Look at style names and see if some can be more sensible.
+* See if some styles are duplicates and can be consolidated.
+* Overall, see if variable names can be made more consistent/clear.
+* usrmgmt_form(): Add some Javascript so that when the superuser chooses a command, other rows are greyed out.
+* usrmgmt_form() (maybe): Separate "Create User" and "Edit Users" into distinct display pages (like "View" and "Create New" pages for tables).
+* Do I want the owner of a process in the "trashcan" (shows up as buttons in the action history) to be visible? I think so.
+* Documentation:
+** Finish documenting schema (including new items)
+** Maybe document security model
+** Maybe flowchart the methods.
+* Additional features:
+** Need to support pagination (maybe).
+** Need to support editing rows (maybe).
+** Do I want tables to have owners? How would that work?
+** Introduce ability to hide tables except to superuser and certain other users.
