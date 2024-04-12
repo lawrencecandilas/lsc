@@ -280,6 +280,8 @@ switch ($ACTION) {
    if(any_errors()) { break; }
   open_database($ini["database"]["name"]);
    if(any_errors()) { break; }
+  create_missing_tables();
+   if(any_errors()) { break; }
   begin_sql_transaction();
    if(any_errors()) { break; }
   invalidate_session(@$_COOKIE["sid"]);
@@ -541,12 +543,14 @@ switch ($ACTION) {
   history_panel_end();
  }
 
-# Output any generated Javascript.
-# - Javascript is used to populate default values in form fields when the
-#   a list item that provides default values changes selection.
-htmlout("<script type='text/javascript'>");
-htmlout($GLOBALS["js"]);
-htmlout("</script>\n");
+if($GLOBALS["output_format"]==="html") {
+ # Output any generated Javascript.
+ # - Javascript is used to populate default values in form fields when the
+ #   a list item that provides default values changes selection.
+ htmlout("<script type='text/javascript'>");
+ htmlout($GLOBALS["js"]);
+ htmlout("</script>\n");
+ }
 
 # Wrap it up.
 finish_output();
@@ -918,6 +922,7 @@ function authenticate($in_username,$in_password,&$out_userinfo) {
    merr("Database error: unable to update internal table - if you keep seeing this message try again later");
    return "";
    }
+  mnotice("This is a new instance of lsc.php! A new database has been successfully created");
   }
 
  # Note that user record is updated on failed login to update the failed login
@@ -1693,8 +1698,14 @@ function start_output($in_table,$session,$in_action) {
 
  switch($GLOBALS["output_format"]){
   case "text":
+   # -------------------------------------------------------------------------
+   # -------------------------------------------------------------------------
    break;
+   # -------------------------------------------------------------------------
+   # -------------------------------------------------------------------------
   case "html":
+   # -------------------------------------------------------------------------
+   # -------------------------------------------------------------------------
    htmlout("<!doctype html>");
    htmlout("<html>");
    htmlout("<head>");
@@ -1703,53 +1714,88 @@ function start_output($in_table,$session,$in_action) {
    htmlout("</head>");
    htmlout("<body>");
    htmlout("<main>");
+
+   # App header
+   # -------------------------------------------------------------------------
    htmlout("<div id='app-header'>");
 
-   htmloutp("<table><tr><td><h2>lsc</h2></td>");
-   htmloutp("<td><h2 style='text-align: right'>".$GLOBALS["username"]."@".$GLOBALS["hostname"]."</span></h2></td></tr></table>",1);
+   # App header title
+   # -------------------------------------------------------------------------
 
+   # Make app header title text red if trace or debug is enabled.
+   $alert_style="";
+   if((isset($GLOBALS["internal"]["trace"])) or isset($GLOBALS["internal"]["debug"])) {
+    $alert_style="color: red;";
+    }
+
+   htmloutp("<table><tr><td><h2 style='".$alert_style."'>lsc</h2></td>");
+   htmloutp("<td><h2 style='text-align: right;".$alert_style."'>".$GLOBALS["username"]."@".$GLOBALS["hostname"]."</span></h2></td></tr></table>",1);
+
+   # App header / Account bar: shows currently logged in username and account
+   # buttons
+   # -------------------------------------------------------------------------
    htmlout("<table class='account-bar'>");
+
+   if(!isset($session["uid"])) { 
+    # What is displayed if there is not a session is super simple.
+    # Account sign up button could be generated here if ever desired.
+    htmlout("<td>Not Logged In");
+    }
+
    if(isset($session["uid"])) { 
-    htmloutp("<td style='vertical-align: top;'>".$session["appuser-uid"]);
+    # Output currently logged-in username.
+    htmloutp("<td style='vertical-align: top;'>".safe4html($session["appuser-uid"]));
+     # Handle any relevant session tags.
      if(isset($session["tag_is_superuser"])) { htmloutp("👑"); }
      if(isset($session["tag_upcoming_forced_password_reset"])) { htmloutp("✴️"); }
     htmloutp("</td>",1);
+    # Account buttons.
     htmlout("<td style='vertical-align: top; text-align: right;'>");
-   
+
+    # Button to bring up user management form. 
     if(isset($session["tag_is_superuser"])) {
-     htmlout("<form class='top1' action='".$GLOBALS["scriptname"]."' method=post>");
+     # Superuser only.
+     # Note that if this was hacked to display for non-superusers, it still
+     # wouldn't work.
+     htmlout("<form class='top1' action='".$GLOBALS["scriptname_out"]."' method=post>");
      htmlout("<input type='hidden' id='action' name='action' value='show_form_user_management'>");
      htmloutp("<button class='appuser-button'");
+      # Button doesn't need to work if user is already looking at form.
       if($in_action=="show_form_user_management") { htmloutp(" disabled "); }
      htmloutp(">Admin</button>",1);
      htmlout("</form>");
+
      htmlout(" ");
      }
 
-    htmlout("<form class='top1' action='".$GLOBALS["scriptname"]."' method=post>");
+    # Button to bring up account management form. 
+    htmlout("<form class='top1' action='".$GLOBALS["scriptname_out"]."' method=post>");
     htmlout("<input type='hidden' id='action' name='action' value='show_form_my_account'>");
     htmloutp("<button class='appuser-button'");
-    if($in_action=="show_form_my_account") { htmloutp(" disabled "); }
+     # Button doesn't need to work if user is already looking at form.
+     if($in_action=="show_form_my_account") { htmloutp(" disabled "); }
     htmloutp(">Account</button>",1);
     htmlout("</form>");
 
     htmlout(" ");
 
-    htmlout("<form class='top1' action='".$GLOBALS["scriptname"]."' method=post>");
+    # Button to log out.
+    htmlout("<form class='top1' action='".$GLOBALS["scriptname_out"]."' method=post>");
     htmlout("<input type='hidden' id='action' name='action' value='logout'>");
     htmlout("<button class='appuser-button'>Log Out</button>");
     htmlout("</form>");
-    } else { 
-    htmlout("<td>Not Logged In");
     }
+
    htmlout("</td>");
    htmlout("</table>");
 
+   # Toplink box row: links to homepage and tables.
+   # -------------------------------------------------------------------------
    htmlout("<table>");
    htmlout("<tr class='toplink-box-row'>");
    htmloutp("<td class='toplink-box ");
    if($tbl==="none") { htmloutp("toplink-selected'"); } else { htmloutp("toplink-not-selected'"); }
-   htmloutp("><p><a class='toplink' href='".$GLOBALS["scriptname"]."'>home</a></p></td>",1);
+   htmloutp("><p><a class='toplink' href='".$GLOBALS["scriptname_out"]."'>home</a></p></td>",1);
 
    foreach($GLOBALS["schemadef"] as $tblcolname=>$colattrs) {
    if(!str_ends_with($tblcolname,"FOR_THIS_APP")) { continue; }
@@ -1758,14 +1804,17 @@ function start_output($in_table,$session,$in_action) {
     if(isset($attrs["toplink"])) {
      htmloutp("<td class='toplink-box ");
      if($split_tblcolname[0]===$tbl) { htmloutp("toplink-selected'"); } else { htmloutp("toplink-not-selected'"); }
-     htmloutp("><p><a class='toplink' href='".$GLOBALS["scriptname"]."?table=".$split_tblcolname[0]."'>".$attrs["toplink"]."</a></p></td>",1);
+     htmloutp("><p><a class='toplink' href='".$GLOBALS["scriptname_out"]."?table=".safe4html($split_tblcolname[0])."'>".safe4html($attrs["toplink"])."</a></p></td>",1);
      }
     }
    htmlout("</tr>");
-
    htmlout("</table>");
+
+   # -------------------------------------------------------------------------
    htmlout("</div>");
    break; # /case "html";
+   # -------------------------------------------------------------------------
+   # -------------------------------------------------------------------------
   } # /switch;
  }
 
@@ -1900,14 +1949,18 @@ function finish_output() {
    htmlout("</main>");
    htmlout("</body>");
    htmlout("</html>");
-   if(@$GLOBALS["output_debug_msgs"]) {
+   # If enabled, add debug messages toward end of HTML output as HTML
+   # comments.
+   if(isset($GLOBALS["internal"]["debug"])) {
      htmlout("<!--"); htmlout("Debug Messages:");
     foreach($GLOBALS["outmsgs"]["debug"] as $msg) {
      htmlout(safe4html($msg,32768));
      }
      htmlout(" -->");
     }
-   if(@$GLOBALS["output_trace_msgs"]) {
+   # If enabled, add trace messages toward end of HTML output as HTML
+   # comments.
+   if(isset($GLOBALS["internal"]["trace"])) {
      htmlout("<!--"); htmlout("Trace Messages:");
     foreach($GLOBALS["outmsgs"]["trace"] as $msg) {
      htmlout(safe4html($msg,32768));
@@ -3644,7 +3697,15 @@ function do_erase_upon_clear_logs() {
 
 
 function open_database($in_filename) {
+ mtrace("DB op: open_database($in_filename)");
 # Open database (modifies $GLOBALS["dbo"]).
+# We used to check and initialize the database every time it was opened,
+# but now we just open it.
+ $GLOBALS["dbo"]=new SQLite3($in_filename);
+ }
+
+
+function create_missing_tables() {
 # Also checks database for tables and creates them if missing.
 # Indirectly uses $GLOBALS["schemadef"] via tables_from_schemadef()
 # Uses $GLOBALS["outmsgs"]
@@ -3652,7 +3713,6 @@ function open_database($in_filename) {
  # These are tables used internally that are not part of the schema.
  # If these happen to conflict with any defined in the schema, the schema
  # will be ignored.
- mtrace("DB op: open_database($in_filename)");
  $nonschema_table_sql=Array(
   "internal"	=> "CREATE TABLE internal (
 			 nlog INTEGER NOT NULL 
@@ -3708,7 +3768,6 @@ function open_database($in_filename) {
 			);"
  );
   
- $GLOBALS["dbo"]=new SQLite3($in_filename);
  # We need to check the database for missing tables and create ones that are
  # missing.  If this is a newly created database file (happens automtically if
  # it did not exist), then no tables will be there and we have to create all
@@ -3763,7 +3822,9 @@ function open_database($in_filename) {
   # Initialize the internal table if needed.
   if($init_internal_table) {
    mtrace("initializing internal table");
-   $init_data=Array("nlog"=>0,"superuser_uid"=>"unassigned");
+   $init_data=Array( "nlog"			=> 0
+		    ,"superuser_uid"		=> "unassigned"
+		   );
    insert_row("internal",$init_data);
     if(any_db_error()) { end_any_sql_transaction(); return; }
    }
@@ -4548,6 +4609,8 @@ function htmlout($out_line) {
 
 
 function any_errors(){
+# Very simple - returns true if there are any pending error messages.
+
  if(count($GLOBALS["outmsgs"]["errors"])!=0) { return true; }
  return false;
  }
@@ -4566,6 +4629,9 @@ function any_errors(){
 
 function mdebug($in_msg_text) {
 # Debug messages.
+
+ # Only if enabled - see set_globals().
+ if(!isset($GLOBALS["internal"]["debug"])) { return; }
 
  $GLOBALS["outmsgs"]["debug"][]=ucfirst($in_msg_text).".";
  }
@@ -4597,16 +4663,22 @@ function flag($in_flags) {
 
 
 function merr($in_msg_text,$in_flags="") {
-# Error messages.
+# Add error message to the pile of pending messages.
 # Also calls flag() above.
-
+# - If this array has any items, some error occurred and a failure should be
+# reported.
+# - any_errors() is used to check this conveniently.
  $GLOBALS["outmsgs"]["errors"][]=ucfirst($in_msg_text)."."; 
  if($in_flags!=""){flag($in_flags);}
  }
 
 
 function mtrace($in_msg_text,$in_flags="") {
-# Trace messages.
+# Add trace message to the pile of pending messages.
+
+ # Only if enabled - see set_globals().
+ if(!isset($GLOBALS["internal"]["trace"])) { return; }
+
  if($in_flags==="") {
   $GLOBALS["outmsgs"]["trace"][]=$in_msg_text;
   } else {
@@ -4724,9 +4796,15 @@ function set_globals($in_user="",$in_hostname="",$in_this_script_name="") {
   if(file_exists("/etc/lsc/$in_user/readonly")) { $GLOBALS["disabled"]=true; }
   } while(false);
 
+ # Other things controlled by file presence.
+ if(file_exists("/etc/lsc/trace")) { $GLOBALS["internal"]["trace"]=true; }
+ if(file_exists("/etc/lsc/debug")) { $GLOBALS["internal"]["debug"]=true; }
+
  $GLOBALS["username"]=$in_user;
  $GLOBALS["hostname"]=$in_hostname;
  $GLOBALS["scriptname"]=$in_this_script_name;
+ # Just in case someone tries to inject HTML by renaming the script file.
+ $GLOBALS["scriptname_out"]=safe4html($in_this_script_name,256);
  }
 
 
