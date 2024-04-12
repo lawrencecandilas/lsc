@@ -9,7 +9,9 @@ In creating this application, I wanted to make it 100% "database-centered" - mea
 - update existing row
 - delete exsing row
 
-Actions that are not strictly data operations exist in this scheme as "triggers."  The two main types of triggers are **generators** and **row methods**.
+Actions that are not strictly data (or session/account) operations exist in this scheme as "triggers."  The two main types of triggers are **generators** and **row methods**.
+
+*Note: Rights, such as ownership, are tracked in a separate internal table and the application portion of the database doesn't need to reserve columns to identify owners or anything like that. There are some attributes used to tell the application things relating to ownership.*
 
 * **Generators** come into play when a new row is created.  Generators are functions that are called "by a column" to generate value--instead of taking that from user-provided input. Generators are required to provide a value (or report failure), but can also do anything else as a "side effect."
 
@@ -65,12 +67,12 @@ I decided a "virtual column" would be a good idea - anything in the column named
 
 * Table Metadata Attributes
   * Appearance
-  * Requirements
   * Allowed Actions
-  * Defaut Values
-  * Dependency Relationships
-  * Row Methods
+  * Default Values
   * Delete Action Related
+  * Dependency Relationships
+  * Requirements
+  * Row Methods
 * Column Metadata Attributes
   * Appearance
   * The "In-Journey" - What Puts Data In The Column (And How)?
@@ -82,7 +84,7 @@ I decided a "virtual column" would be a good idea - anything in the column named
 
 #### Table Metadata Attributes: Appearance
 `friendly-object-name:TEXT`
-What the table in general will be referred to in error messages, log messages, and buttons.
+What the table in general will be referred to in error messages, log messages, and buttons. If omitted, something generic will be used (like "this item") or the object name won't appear (e.g. you'll see "Delete" instead of "Delete friendly object name.")
 
 `instance-friendly-name-is:COLUMN_NAME-SAME_TABLE`
 If a message needs to talk about a specific row (specific "instance" of an "object"), the value in this column will be used. The column's value should uniquely identify something and make sense to the end user.
@@ -91,26 +93,12 @@ If a message needs to talk about a specific row (specific "instance" of an "obje
 This title text will be rendered at the top of the "Create New" form.
 
 `title:TEXT`
-Friendly, user-facing title of table.  Displayed at the very top of the HTML output.
+Friendly, user-facing title of the entire table presentation - currently rendered as a `<caption>` element.  Visible in both the "View" and "Create New" output. If not specified, the title element is not emitted.
 
 `toplink:TEXT`
 If this is defined for the table, this text will be used to create a link in the navigation bar, and the user can then use it to view the table's data and create new rows ("objects").
 
 * If this is NOT defined, it is assumed you don't want the end user to interact the table directly and the application won't generate a navigation link to access the table. Hacked requests targeting the table will only result in an error message and a logged hack event. 
-
-#### Table Metadata Attributes: Requirements
-
-`must-exist-in-fails-message:TEXT`
-If `row-must-exist-in:X` is defined, and the user tries to create a new row but nothing is in table X, the request isn't processed and this message is displayed as an error message.
-
-`row-must-exist-in:TABLE_NAME`
-Specifies that at least one row must exist in the table named `TABLE_NAME` before the user may create a new row in this table. *See `must-exist-in-fails-message`.*
-
-`single-row-only` [Does not take a value]
-Table will be in "Single Row Mode" - the table may have a maximum of one row. The "Create New" form won't appear if the table already has a row. Hacked HTTP requests that try to force the issue will be refused as well.
-
-`single-row-only-empty-message:TEXT`
-If the table is in "Single Row Mode", this message will be displayed in the "View" HTML output if the table is empty.  This won't have any effect if `single-row-only` isn't specified.
 
 #### Table Metadata Attributes: Allowed Actions
 
@@ -134,6 +122,11 @@ Let's say the above is part of a table called `performance_reviews.`  With the a
 `defaults-provided-by:TABLE_NAME`
 Tells the application that the table named "TABLE_NAME" supplies default values for this table.
 
+#### Table Metadata Attributes: Delete Action Related
+
+`erase-upon-clear-logs`
+If specified, this table will be SQL `DELETE`ed along with the internal `log` table when a `clear_logs` request is received.
+
 #### Table Metadata Attributes: Dependency Relationships
 
  `backref-by:COLUMN_NAME-SAME_TABLE`
@@ -151,7 +144,7 @@ When a row is deleted, the application checks if anything is pointing to it by q
 `pointer-links-by:COLUMN_NAME_OTHER_TABLE`
 `shown-by:COLUMN_NAME_OTHER_TABLE1,COLUMN_NAME_OTHER_TABLE2` \[etc\]
 
-The `is-pointer-to` attribute, when specifeid, tells the application that this column serves as a reference to another column in another table.  
+The `is-pointer-to` attribute, when specified, tells the application that this column serves as a reference to another column in another table.  
 The `pointer-links-by` attribute specifies that column. 
 
 The `shown-by` attribute tells the application how to present this to to the user - data from these columns in the other table will be used to render the column's value. Multiple columns can be specified.
@@ -161,16 +154,34 @@ The `shown-by` attribute tells the application how to present this to to the use
 
 &nbsp;
 
+#### Table Metadata Attributes: Ownership
+
+`owner-identified-by:COLUMN_NAME-SAME TABLE`
+When a row is created, if this attribute is present, an ownership right will be created. Rights checking code will select against this column of the table to determine which row the right points to. 
+- You probably want to `must-be-unique` specified on that column.
+- If you specify an `allow-delete-by` column you can use that column for `owner-identified-by` too.
+- If this is not specified, no ownership right will be created to the row. This will mean only the superuser can alter or delete that row.
+
+#### Table Metadata Attributes: Requirements
+
+`must-exist-in-fails-message:TEXT`
+If `row-must-exist-in:X` is defined, and the user tries to create a new row but nothing is in table X, the request isn't processed and this message is displayed as an error message.
+
+`row-must-exist-in:TABLE_NAME`
+Specifies that at least one row must exist in the table named `TABLE_NAME` before the user may create a new row in this table. *See `must-exist-in-fails-message`.*
+
+`single-row-only` [Does not take a value]
+Table will be in "Single Row Mode" - the table may have a maximum of one row. The "Create New" form won't appear if the table already has a row. Hacked HTTP requests that try to force the issue will be refused as well.
+
+`single-row-only-empty-message:TEXT`
+If the table is in "Single Row Mode", this message will be displayed in the "View" HTML output if the table is empty.  This won't have any effect if `single-row-only` isn't specified.
+
 #### Table Metadata Attributes: Row Methods
 
 `each-row-method:METHOD_NAME1,METHOD_DISPLAY1,TARGET_COLUMN1;METHOD_NAME1,METHOD_DISPLAY1,TARGET_COLUMN2` \[etc\]
 Lists the row methods that will be emitted with the row's data in the "View" HTML output for the table. `METHOD_NAME` is the internal method name (passed in the POST request) and should not consist of anything but letters and underscores. `METHOD_DISPLAY` is the user-facing name that will be emitted in the HTML button. `TARGET_COLUMN` is how the method will know which row to perform an action on - and will be part of the HTML output.
 
 &nbsp;
-
-#### Table Metadata Attributes: Delete Action Related
-`erase-upon-clear-logs`
-If specified, this table will be SQL `DELETE`ed along with the internal `log` table when a `clear_logs` request is received.
 
 #### Column Attributes: Appearance 
 `display-using-other-table` \[Does not take a value\]
@@ -205,7 +216,9 @@ Specifies a presentation width for the column's HTML output.
 `injourney:IN_JOURNEY_METHOD`
 I've used the term "in-journey" to refer to the way data gets into a column when a new row is made.
 
-You might be thinking, "isn't it always something the user enters?" and no, this is not the case. Some columns may be automatically populated (and not even visible to the user). A good example is a UUID - those are typically automatically generated by the application and nothing the user should need to worry about physically entering.
+You might be thinking, "isn't it always something the user enters?" and no, this is not the case. 
+- Some columns may be automatically populated (and not even visible to the user). 
+   - A good example is a UUID - those are typically automatically generated by the application and nothing the user should need to worry about physically entering.
 
 Even when the user is expected to provide data - there are also multiple *ways* the user may do that--entering text in a field, selecting from a list, etc.--and this attribute tells the application which one to present in HTML output..
 
@@ -306,4 +319,8 @@ Determines the minimum and maximum length of `str` types. Has no effect on `int`
 
 The application uses HTML form validation to enforce this validation requirement, and also checks again when processing submitted requests, so an SQL error should never be returned to the user even if hacked query strings are used.
 
+`must-be-unique` [Does not take a value]
+The application will require that this column in each row be unique. If this is specified, `UNIQUE` is specified in SQL statements when the application creates its database.
+
+The application uses HTML form validation to enforce this validation requirement, and also checks again when processing submitted requests, so an SQL error should never be returned to the user even if query strings are hacked.
 
