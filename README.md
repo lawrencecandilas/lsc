@@ -10,10 +10,11 @@ A *service* is a simply a command, that takes a filename, URL prefix, and/or a p
 ### Installation
 `lsc.php` is a PHP application, so you will need a web server such as Apache running and setup to handle PHP scripts. You may want to use php-fpm or other configuration that allows `lsc.php` as a different local user than `www-data` for security purposes.  
 
-- `lsc.php` requires the PHP `sqlite3` module.  You can install this under Debian with a `sudo apt-get install php-sqlite3`.
+- `lsc.php` requires the PHP `sqlite3` module. You can install this under Debian with a `sudo apt-get install php-sqlite3`.
 - Create the .INI file.
 - Copy `lsc.php` to a location accessible and serveable by your webserver.  You can rename `lsc.php` if you want.
-- `lsc.php` automatically creates its database when you access it the first time.
+- `lsc.php` does not emit absolute URLs so it can be attached to any external URL by your reverse proxy.
+- `lsc.php` automatically creates its database when you access it the first time.  - You will need to log in with the default superuser password - `admin` and `admin`. You'll be required to change that password before doing anything else.
 
 `lsc.php` was developed and tested under a Linux Debian 11 system with PHP 8.2.  Earlier versions of PHP may not be supported.
 
@@ -34,9 +35,13 @@ A *service* is a simply a command, that takes a filename, URL prefix, and/or a p
 - Now, you should be able to go to the Processes tab and start the service - you will have to enter a filename (if needed) and select a location first.
 
 ### Security Considerations
-IMPORTANT: **Currently `lsc.php` doesn't implement access control.  You absolutely should configure HTTP Authentication in your web server to protect `lsc.php` with a username and password.**
 
-`lsc.php` as shipped has a number of security safety features. Most of these can be bypassed by wrapper scripts and appropriate local configuration, so these features won't absolutely guarantee security.
+`lsc.php` implements user accounts, sessions, and ownership.
+- The cookie used to identify sessions currently is accepted from any IP so be sure to destroy sessions by logging out when you are done. 
+- Passwords are stored in the database as SHA-512 hashes. 
+- Someone who can locally edit the database can give themselves access, but they could do anything `lsc.php` allows them to do anyway.
+
+On top of that, `lsc.php` has a number of security safety features. Most of these can be bypassed by wrapper scripts and appropriate local configuration, so these features won't absolutely guarantee security.
 
 `lsc.php` ...
 - ... will not run as root - if running as root, it will not even read the .INI file or open the database.
@@ -45,7 +50,7 @@ IMPORTANT: **Currently `lsc.php` doesn't implement access control.  You absolute
 - ... will only launch executables that are whitelisted in the .INI file.  
   - The .INI file should not have write permissions by the user or group account that `lsc.php` is running as.
 - ... checks the suid/sgid bits before executing commands - will not run them if either is set.
-- ... has an internal blacklist of directories and executable names that it will not run, such as anything in `/sbin` or `/bin/password.`
+- ... has an internal blacklist of directories and executable names that it will not run, such as anything in `/sbin` or `/bin/passwd.`
 
 ### License
 GPLv3.
