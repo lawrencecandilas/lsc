@@ -20,6 +20,14 @@ ini_set('display_errors','On');
 # == = = = = = = = = = = = = = = = = MAIN = = = = = = = = = = = = = = = = = ==
 # ----------------------------------------------------------------------------
 
+# Internal configuration constants
+$GLOBALS["P_MAX_NLOG"]=10;
+$GLOBALS["P_MAX_SESSION_COUNT"]=5;
+$GLOBALS["P_MAX_SESSION_DURATION"]=86400;
+$GLOBALS["P_MAX_APIKEY"]=3;
+$GLOBALS["P_MAX_APIKEY_NAME_LENGTH"]=16;
+$GLOBALS["P_MAX_USERS"]=10;
+$GLOBALS["P_MAX_USERNAME_LENGTH"]=32;
 
 set_schemadef();
 
@@ -351,7 +359,7 @@ switch ($ACTION) {
  # ---------------------------------------------------------------------------
  case "modify_my_account":
  # ---------------------------------------------------------------------------
-  $P=Array("table"=>"none","reset_password"=>"","random_password"=>"","kill_sessions"=>"","disable_account"=>"");
+  $P=Array("table"=>"none","delete_apikey"=>"","new_apikey_name"=>"","reset_password"=>"","random_password"=>"","kill_sessions"=>"","disable_account"=>"");
    find_and_sanitize_incoming($_POST,Array(),$P);
    is_table_known($P["table"]);
    if(any_errors()) { break; }
@@ -548,7 +556,9 @@ if($GLOBALS["output_format"]==="html") {
  # - Javascript is used to populate default values in form fields when the
  #   a list item that provides default values changes selection.
  htmlout("<script type='text/javascript'>");
+ htmlout("//<![CDATA[");
  htmlout($GLOBALS["js"]);
+ htmlout("//]]>");
  htmlout("</script>\n");
  }
 
@@ -613,6 +623,7 @@ exit;
 # - Handling provided data via HTTP Request
 # - HTTP "action" and "format" query string
 # - Table/table form output support
+# - Generic input validation
 # - Presentation support
 # - Filename functions
 # - Internal executable blacklist
@@ -623,6 +634,7 @@ exit;
 # - Error reporting, status checking, and notification
 # - Initialization-related
 # - Code I borrowed from somewhere else
+# - Maintenance
 # - Style sheet
 
 
@@ -829,6 +841,122 @@ function waive_rights($in_session,$in_table,$in_target_row) {
 # ----------------------------------------------------------------------------
 
 
+function authenticate_api_key($in_apikey,&$out_userinfo) {
+# Returns UID (account number) if incoming api key authenticates.
+# Otherwise returns null.
+# Returns other attributes in $out_userinfo associative array.
+
+ # NO authentication if app is disabled.
+ # We should not even get here, but doesn't hurt to check.
+ if($GLOBALS["disabled"]) { 
+  merr("API key authentications can't be processed while the application is not accepting requests");
+  return "";
+  }
+
+ # Deal with any total garbage we happen to get.
+ $wtf=false;
+ if($in_apikey===""){ $wtf=true; }
+ # TODO: Verify api key is a properly formatted UUID.
+ if($wtf) {
+  merr("No API key provided","hack");
+  return "";
+  }
+
+ $need_to_update_apikey_record=false;
+ $apikey_accepted=false;
+
+ $in_apikey=strtolower($in_apikey);
+
+ $existing_apikey_record=Array();
+ $result=read_row_expecting_just_one($existing_apikey_record,"apikeys","apikey",$in_apikey);
+ if(any_db_error()) { 
+  merr("Unable to read apikeys table - if you keep seeing this message try again later");
+  return "";
+  }
+
+ do {
+  # If database didn't return anything, we don't know this key.
+  if($result===false) { break; }
+  # .
+  # .
+  # 
+  # If no conditions above break early, the key is good.
+  $apikey_accepted=true;
+  # Update last accessed time and usage counter
+  $existing_apikey_record["last_accessed"]=time();
+  $existing_apikey_record["use_count"]++;
+  $need_to_update_apikey_record=true;
+  break;
+  } while (false);
+
+ if(!$apikey_accepted) { 
+  # Potential bad actor doesn't need to know why we're not accepting the key.
+  merr("API key not accepted");
+  $GLOBALS["outmsgs"]["notices"]=Array();
+  return "";
+  }
+
+ # At this point, we have a known API key.
+ # Now we need to get the owning user and check things on the user record.
+
+ $owning_uid=$existing_apikey_record["owning_uid"];
+ $need_to_delete_apikey_record=false;
+ $need_to_update_user_record=false;
+ $accepted=false;
+
+ $existing_appuser=Array();
+ $result=read_row_expecting_just_one($existing_appuser,"appusers","uid",$owning_uid);
+ if(any_db_error()) { 
+  merr("Unable to read appusers table - if you keep seeing this message try again later");
+  return "";
+  }
+
+ do {
+  # If database returned no data, username doesn't refer to a user that exists.
+  # We won't tell the end user that, though (see message issued below).
+  # We absolutely will kill this key though.
+  if($result===false) { 
+   $need_to_delete_apikey_record=true;
+   break;
+   }
+  # Do not accept if account is not enabled.
+  if($existing_appuser["enabled"]!=1) { break; }
+  # If none of the above are true, we're good.
+  $accepted=true;
+  break;
+  } while (false);
+
+ if($need_to_update_apikey_record) {
+  update_row("apikey",$existing_apikey_record,"apikey",$in_apikey);
+  }
+
+ if($need_to_delete_apikey_record) { 
+  # Keys that don't point to existing users are deleted on sight.
+  delete_row_bypass_schema("apikey","apikey",$in_apikey);
+  }
+
+ if(any_db_error()) {
+  merr("Database error: unable to update apikey table - if you keep seeing this message try again later");
+  return "";
+  } 
+
+ if(!$accepted) { 
+  # Potential bad actor doesn't need to know why we're not accepting the key.
+  merr("API key not accepted");
+  $GLOBALS["outmsgs"]["notices"]=Array();
+  return "";
+  }
+
+ # At this point, authentication is completed.
+ # Forwarding this data ...
+ $out_userinfo["uid"]=$existing_user["uid"];
+ $out_userinfo["username"]=$existing_user["username"];
+ # Add a tag to indicate authentication type to the outgoing user data array.
+ $out_userinfo["authtype"]="password";
+ return $existing_appuser["uid"];
+ }
+
+
 function authenticate($in_username,$in_password,&$out_userinfo) {
 # Returns UID (account number) if provided password authenticates.
 # Otherwise returns null.
@@ -937,9 +1065,16 @@ function authenticate($in_username,$in_password,&$out_userinfo) {
 
  if(!$accepted) { 
   merr("Login not accepted");
+  # if you can't handle me at my login you don't deserve me at my any useful
+  # information.
+  $GLOBALS["outmsgs"]["notices"]=Array();
   return "";
   }
 
+ # At this point, authentication is completed.
+ # Add a tag to indicate authentication type to the outgoing user data array.
+ $out_userinfo["authtype"]="password";
+ # Forward on force password reset info as well.
  $out_userinfo["force_password_reset"]=$existing_appuser["force_password_reset"];
  return $existing_appuser["uid"];
  }
@@ -956,10 +1091,10 @@ function make_session($in_uid,&$session,$in_forcing_password_reset=false) {
   return "";
   }
 
-
  $existing_sessions=read_table_filtered_rows("sessions","uid",$in_uid);
- if(count($existing_sessions)>4) {
-  merr("Too many active sessions - either log out of one of them or wait for one of them to expre");
+ if(count($existing_sessions)>($GLOBALS["P_MAX_SESSION_COUNT"]-1)) {
+  merr("Too many active sessions");
+  mnotice("Log out of one of your other sessions, wait for a session to expire, or ask an admin to clear your sessions");
   return; 
   }
 
@@ -1002,7 +1137,7 @@ function make_session($in_uid,&$session,$in_forcing_password_reset=false) {
  }
 
 
-function connect_session($in_cookie_sid,&$session) {
+function connect_session($in_cookie_sid,&$session,$in_apikey="") {
 # Checks if session exists, and if it does, if its valid.
 # * If session is good, sid and uid entered into provided associative array
 # and true is returned.
@@ -1012,33 +1147,67 @@ function connect_session($in_cookie_sid,&$session) {
  # NO sessions if app is disabled.
  # We should not even get here, but doesn't hurt to check.
  if($GLOBALS["disabled"]) { 
-  merr("Existing sessions can't be connected while the application is not accepting requests");
+  if($in_apikey!=="") {
+   merr("The application is not currently accepting requests - unable to process API requests");
+  } else {
+   merr("The application is not currently accepting requests - unable to connect existing sessions");
+  } 
   return false;
   }
 
+ if($in_apikey!=="") {
+  # If we're processing an API key-based call instead of somerthing that
+  # should come from the web UI, then things are different.
+  $apikey_owner_data=Array();
+  $apikey_owner_uid=authenticate_api_key($in_apikey,$apikey_owner_data);
+  if($userinfo==="") { return false; } 
+  $session["sid"]="apicall:".$in_apikey;
+  $session["uid"]=$apikey_owner_uid;
+  $session["created"]=time();
+  $session["appuser-uid"]=$apikey_owner_data["username"];
+  return true;
+  }
+
  $existing_session=Array();
- $result=read_row_expecting_just_one($existing_session,"sessions","sid",$in_cookie_sid);
+ # This is wrapped in a try{} because if the database is deleted, sessions
+ # table is corrupt or missing, or there is some other issue with the
+ # database read, we would prefer not to show warnings.
+ # Because we can't verify the sid belongs to an authenticated user.
+ try {
+  error_reporting(E_ALL ^ E_WARNING);
+  $result=read_row_expecting_just_one($existing_session,"sessions","sid",$in_cookie_sid);
+ } catch(\Throwable $e) {
+  error_reporting(E_ALL);
+  $returned_error_text=$GLOBALS["dbo"]->lastErrorMsg();
+  if(str_contains($returned_error_text,"no such table")) {
+   return false;
+   } else {
+   throw($e);
+   }
+  }
+
  if(any_db_error()) { 
   merr("Unable to read session table.");
   return false;
-  }
+ }
+
  # Bounce if sid not found in table.
  if($result===false) {
-  mnotice("Session expired. Log in again.");
+  mnotice("Session expired"); mnotice("Please log in again");
   # Invalidate just in case.
   invalidate_session($in_cookie_sid);
   return false;
   }
  # Don't use (and invalidate) session if expired.
- if(($existing_session["created"]+86400)<time()) {
+ if(($existing_session["created"]+$GLOBALS["P_MAX_SESSION_DURATION"])<time()) {
   invalidate_session($in_cookie_sid);
-  mnotice("Session expired. Log in again.");
+  mnotice("Session expired"); mnotice("Please log in again");
   return false;
   }
  # Now see if uid exists in user table.
  $existing_user=Array();
  $result=read_row_expecting_just_one($existing_user,"appusers","uid",$existing_session["uid"]);
- if(any_db_error()) { merr("Unable to read appusers table."); return; }
+ if(any_db_error()) { merr("Unable to read appusers table"); return; }
  if($result===false) { merr("Your account was removed."); return; }
 
  $session=$existing_session;
@@ -1055,12 +1224,21 @@ function invalidate_session($in_cookie_sid) {
 # Deletes row with matching sid from sessions table.
 # merr() only issued if there is a db error.  
 
- setcookie("sid","",(time()+3600));
+ setcookie("sid","",(time()+$GLOBALS["P_MAX_SESSION_DURATION"]));
  delete_row_bypass_schema("sessions","sid",$in_cookie_sid);
  if(any_db_error()) { 
   merr("Database error: unable to update session table");
   return;
   }
+ }
+
+
+function delete_expired_session($in_cookie_sid) {
+# Deletes row with matching sid from sessions table.
+# Will not set current cookie because it is assumed it is not the current
+# session.
+# Does not call merr() on error.
+ delete_row_bypass_schema("sessions","sid",$in_cookie_sid);
  }
 
 
@@ -1208,6 +1386,9 @@ function process_modusertable_request(&$in_session,$in_array_data) {
 # Processes requests from the "User Management" form which allows creating,
 # issuing commands targeting, and deleting user accounts.
 
+ # Validate input
+ 
+
  if($GLOBALS["output_format"]!=="html") { return; } # HTML format only.
  # Valid session required.
  if(!isset($in_session["appuser-uid"])) { 
@@ -1233,24 +1414,35 @@ function process_modusertable_request(&$in_session,$in_array_data) {
   case "new_user":
   # --------------------------------------------------------------------------
    # was username provided? ...
+   # it normally should be if submitted via the HTML form.
    if(!isset($in_array_data["modusertable_new_username"])) {
     merr("Missing parameter 'modusertable_new_username'","hack");
     return false;
     }
+
+   # is the party too full?
+   $n_users=row_count("appusers","username");
+   if($n_users<0) { 
+    merr("Unable to get count from appusers table");
+    break;
+    }
+   if($n_users>($GLOBALS["P_MAX_USERS"]-1)) {
+    merr("Too many users");
+    mnotice("Delete one or more users in order to create a new one");
+    break;
+    }
+
    # is username ...
    $tmp=$in_array_data["modusertable_new_username"];
    # not too long? ...
-   if(strlen($tmp)>32) {
-    merr("New username is too long - must be 31 characters or less");
+   if(strlen($tmp)>($GLOBALS["P_MAX_USERNAME_LENGTH"]-1)) {
+    merr("New username is too long - must be ".$GLOBALS["P_MAX_USERNAME_LENGTH"]." characters or less","hack");
     }
    # and only contains valid characters?
-   $valid_username_characters='@_-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
-   for($i=0; $i<strlen($tmp); $i++) {
-    if(str_contains($valid_username_characters,$tmp[$i])) { continue; }
+   if(!is_valid_name($tmp)) {
     merr("New username has an invalid character - only letters, numbers, and the following: \"@\", \"_\", and \"-\"");
-    break;
     } 
-   if(any_errors()) { break; } # don't validate if any errors
+   if(any_errors()) { break; }
 
    # Unsetting this because not needed for new user creation.
    # (needed for all other modusertable_action's though)
@@ -1464,6 +1656,83 @@ function modify_my_account(&$session,$in_array_data) {
  $user_data_changes=Array();
  $user_data_change_exists=false;
  $errorflag=false;
+
+ if(@$in_array_data["new_apikey_name"]!=="") { 
+  do {
+   if($GLOBALS["P_MAX_APIKEY"]==0) { 
+    merr("API key creation is disabled for this application");
+    $errorflag=true;
+    break;
+    }
+   $n_apikeys=row_count("apikeys","owning_uid",$session["uid"]);
+   if($n_apikeys<0) {
+    merr("Unable to get count from apikeys table");
+    $errorflag=true;
+    break;
+    }
+   if($n_apikeys>($GLOBALS["P_MAX_APIKEY"]-1)) {
+    merr("Too many API keys");
+    mnotice("Delete (or let expire) one or more API keys in order to create a new one");
+    $errorflag=true;
+    break;
+    }
+
+   $new_apikey_name=$in_array_data["new_apikey_name"];
+   if(strlen($new_apikey_name)>($GLOBALS["P_MAX_APIKEY_NAME_LENGTH"]-1)) {
+    merr("New API key name is too long - must be ".$GLOBALS["P_MAX_APIKEY_NAME_LENGTH"]." characters or less","hack");
+    $errorflag=true;
+    }
+   if(!is_valid_name($new_apikey_name)) { 
+    merr("New API key name has an invalid character - only letters, numbers, and the following: \"@\", \"_\", and \"-\"");
+    }
+   if(any_errors()) { break; }
+
+   $new_apikeys_record["apikey"]=guidv4();
+   $new_apikeys_record["apikeyname"]=$new_apikey_name;
+   $new_apikeys_record["created"]=time();
+   $new_apikeys_record["owning_uid"]=$session["uid"];
+   $new_apikeys_record["last_accessed"]=0;
+   $new_apikeys_record["use_count"]=0;
+   $result=insert_row("apikeys",$new_apikeys_record);
+   if(any_db_error()) {
+    merr("Database error: unable to update apikeys table");
+    $errorflag=true;
+    break;
+    }
+   mnotice("New API key '".$new_apikey_name."' created");
+   mnotice("<span class='tt'>".$new_apikeys_record["apikey"]."</span>");
+   mnotice("Copy this API key now - there is no way to get this key once you leave this page");
+   } while (false);
+  }
+
+ if(@$in_array_data["delete_apikey"]!=="") {
+  do {
+  $in_apikeyname=strtolower($in_array_data["delete_apikey"]);
+  $existing_apikey_record=Array();
+  $result=read_row_expecting_just_one($existing_apikey_record,"apikeys","apikeyname",$in_apikeyname);
+  if($result===false) { 
+   mnotice("API key with that name no longer exists - it may have been deleted before you clicked the Delete button");
+   break;
+   }
+  if(any_db_error()) {
+   merr("Database error: unable to read apikeys table");
+   $errorflag=true;
+   break;
+   }
+  if($existing_apikey_record["owning_uid"]!==$session["uid"]) {
+   merr("Your account does not meet the requirements to delete this API key","hack");
+   $errorflag=true;
+   break;
+   }
+  delete_row_bypass_schema("apikeys","apikeyname",$in_array_data["delete_apikey"]);
+  if(any_db_error()) {
+   merr("Database error: unable to update apikeys table");
+   $errorflag=true;
+   break;
+   }
+  mnotice("API key '".$in_apikeyname."' deleted");
+   } while (false);
+  }
  
  if($in_array_data["reset_password"]==="on") {
   $user_data_change_exists=true;
@@ -1739,7 +2008,7 @@ function start_output($in_table,$session,$in_action) {
    if(!isset($session["uid"])) { 
     # What is displayed if there is not a session is super simple.
     # Account sign up button could be generated here if ever desired.
-    htmlout("<td>Not Logged In");
+    htmlout("<td>Not Logged In</td>");
     }
 
    if(isset($session["uid"])) { 
@@ -1991,23 +2260,35 @@ function usrmgmt_form_section_inbetween() {
  htmlout("<br />");
  }
 function usrmgmt_form_usercard($in_array_user_data,$in_is_superuser) {
-  htmlout("<table class='non-editable-table'><tr>");
-  htmloutp("<td class='form-column-header'>Username</td><td class='form-column-data' colspan=2>");
-  htmloutp(safe4html($in_array_user_data["username"],24),1);
-  if($in_is_superuser) { htmloutp("👑"); }
-  if($in_array_user_data["enabled"]==0) { htmloutp("🚫"); }
-  if($in_array_user_data["force_password_reset"]==1) { htmloutp("✳️"); }
-  htmloutp("</td>",1);
-  htmlout("</tr><tr>");
-  htmlout("<td class='form-column-header'>Created</td><td class='form-column-data' colspan=2>".timestamp_to_string($in_array_user_data["created"])."</td>");
-  htmlout("</tr><tr>");
-  htmlout("<td class='form-column-header'>Last Login</td><td class='form-column-data' colspan=2>".timestamp_to_string($in_array_user_data["last_login_attempt"])."</td>");
-  htmlout("</tr></table>");
-
+ htmlout("<table class='non-editable-table' id='".safe4html($in_array_user_data["uid"])."'><tr>");
+ htmloutp("<td class='form-column-header'>Username</td><td class='form-column-data' colspan=2>");
+ htmloutp(safe4html($in_array_user_data["username"],24),1);
+ if($in_is_superuser) { htmloutp("👑"); }
+ if($in_array_user_data["enabled"]==0) { htmloutp("🚫"); }
+ if($in_array_user_data["force_password_reset"]==1) { htmloutp("✳️"); }
+ htmloutp("</td>",1);
+ htmlout("</tr><tr>");
+ htmlout("<td class='form-column-header'>Created</td><td class='form-column-data' colspan=2>".timestamp_to_string($in_array_user_data["created"])."</td>");
+ htmlout("</tr><tr>");
+ htmlout("<td class='form-column-header'>Last Login</td><td class='form-column-data' colspan=2>".timestamp_to_string($in_array_user_data["last_login_attempt"])."</td>");
+ htmlout("</tr></table>");
  # htmlout("<table><tr>");
  # htmlout("<td class='form-column-header'>Enabled?</td><td class='form-column-data'>".$in_array_user_data["enabled"]."</td><td class='form-column-header'>Failed Login Counter</td><td class='form-column-data'>".$in_array_user_data["failed_logins_consec"]."</td>");
  # htmlout("</tr>");
  # htmlout("</table>");
+ }
+function usrmgmt_form_apikeycard($in_array_apikey_data) {
+ htmlout("<table class='non-editable-table'><tr>");
+ htmloutp("<td class='form-column-header'>API key name</td><td class='form-column-data' colspan=2>");
+ htmloutp(safe4html($in_array_apikey_data["apikeyname"],24),1);
+ htmloutp("</td>",1);
+ htmlout("</tr><tr>");
+ htmlout("<td class='form-column-header'>Created</td><td class='form-column-data' colspan=2>".timestamp_to_string($in_array_apikey_data["created"])."</td>");
+ htmlout("</tr><tr>");
+ htmlout("<td class='form-column-header'>Last Accessed</td><td class='form-column-data' colspan=2>".timestamp_to_string($in_array_apikey_data["last_accessed"])."</td>");
+ htmlout("</tr><tr>");
+ htmlout("<td class='form-column-header'>Use Count</td><td class='form-column-data' colspan=2>".safe4html($in_array_apikey_data["use_count"])."</td>");
+ htmlout("</tr></table>");
  }
 
 function usrmgmt_admin_form($session) {
@@ -2015,6 +2296,7 @@ function usrmgmt_admin_form($session) {
 # Only accessible by superuser.
 
  if($GLOBALS["output_format"]!=="html") { return; } # HTML format only.
+
  if(!isset($session["appuser-uid"])) { 
   htmlout("<p>Please log in to view this form.</p>");
   return;
@@ -2032,25 +2314,30 @@ function usrmgmt_admin_form($session) {
   htmlout("</div>");
   usrmgmt_form_section_inbetween();
 
+  $appuser_list=read_table_all_rows("appusers");
+  
   # User Management Admin Form - Create User
   htmlout("<form action='".$GLOBALS["scriptname"]."' method=post>");
   htmlout("<input type='hidden' id='action' name='action' value='adm_modify_user_table' />");
   htmlout("<input type='hidden' id='action' name='modusertable_action' value='new_user' />");
   usrmgmt_form_section_start();
   htmlout("<tr>");
-  htmlout("<td class='form-column-header'><label for='username'>New Account Username</label</td>");
-  htmlout("<td class='form-column-data'><input style='width: 98%;' type='text' id='modusertable_new_username' name='modusertable_new_username' required /></td>");
-  htmlout("</tr>");
-  htmlout("<tr><td colspan=2 class='rowmethod-container'><button class='rowmethod-button'>Create User Account</button></td></tr>");
-  htmlout("<tr><td colspan=2 class='rowmethod-container'>Note: New accounts start off disabled.</td></tr>");
+  if(count($appuser_list)>($GLOBALS["P_MAX_USERS"]-1)) {
+   htmlout("<tr><td colspan=2 class='rowmethod-container'>You can't create a new user until an existing one is deleted.</td></tr>");
+   htmlout("<tr><td colspan=2 class='rowmethod-container'> </td></tr>");
+   } else {
+   htmlout("<td class='form-column-header'><label for='username'>New Account Username</label</td>");
+   htmlout("<td class='form-column-data'><input style='width: 98%;' type='text' id='modusertable_new_username' name='modusertable_new_username' required /></td>");
+   htmlout("</tr>");
+   htmlout("<tr><td colspan=2 class='rowmethod-container'><button class='rowmethod-button'>Create User Account</button></td></tr>");
+   htmlout("<tr><td colspan=2 class='rowmethod-container'>Note: New accounts start off disabled.</td></tr>");
+   }
   usrmgmt_form_section_end();
   htmlout("</form>");
 
   usrmgmt_form_section_inbetween();
  
   usrmgmt_form_section_start();
-
-  $appuser_list=read_table_all_rows("appusers");
 
   foreach($appuser_list as $appuser) {
   htmlout("<form action='".$GLOBALS["scriptname"]."' method=post>");
@@ -2061,7 +2348,7 @@ function usrmgmt_admin_form($session) {
    htmlout("<tr>");
 
    htmlout("<td style='background-color: blue; text-align: right; width: 30%;'>");
-   htmlout("<select class='usrmgmt-command-list' name='modusertable_action' id='modusertable_action'>");
+   htmlout("<select onchange='usrmgmt_command_select(this,\"".$htmlout_uid."\");' class='usrmgmt-command-list' name='modusertable_action' id='modusertable_action'>");
     htmlout("<option class='usrmgmt-command' value='' selected='selected'>Select ...</option>");
     htmlout("<option class='usrmgmt-command' value='sessions_delete_all' >Clear All Sessions</option>");
     htmlout("<option class='usrmgmt-command' value='password_expire'	 >Expire Password</option>");
@@ -2072,7 +2359,7 @@ function usrmgmt_admin_form($session) {
     htmlout("<option class='usrmgmt-command' value='pass_crown'		 >Make Superuser</option>");
 
    htmlout("</select>");
-   htmlout("<button class='rowmethod-button'>Proceed</button>");
+   htmlout("<button class='rowmethod-button' id='".$htmlout_uid."' style='visibility: hidden;' disabled>Proceed</button>");
    htmlout("</td>");
 
    htmlout("<td>");
@@ -2087,6 +2374,27 @@ function usrmgmt_admin_form($session) {
 
   usrmgmt_form_section_end();
 
+  $GLOBALS["js"].="function usrmgmt_command_select(in_obj, in_uid) {\n";
+  $GLOBALS["js"].=" var i, toEnable1, toEnable2, toEnable3; \n";
+  $GLOBALS["js"].=" if(in_obj.value==='') {\n";
+  $GLOBALS["js"].="  toEnable1=document.getElementsByClassName('usrmgmt-command-list');\n";
+  $GLOBALS["js"].="  for(i=0; i<toEnable1.length; i++) {\n";
+  $GLOBALS["js"].="   toEnable1[i].removeAttribute('disabled');\n";
+  $GLOBALS["js"].="   }\n";
+  $GLOBALS["js"].="  toEnable2=document.getElementsByClassName('rowmethod-button');\n";
+  $GLOBALS["js"].="  for(i=0; i<toEnable2.length; i++) {\n";
+  $GLOBALS["js"].="   toEnable2[i].style.visibility='hidden';\n";
+  $GLOBALS["js"].="   }\n";
+  $GLOBALS["js"].=" } else {\n";
+  $GLOBALS["js"].="  toEnable1=document.getElementsByClassName('usrmgmt-command-list');\n";
+  $GLOBALS["js"].="  for(i=0; i<toEnable1.length; i++) {\n";
+  $GLOBALS["js"].="   if(toEnable1[i].value==='') { toEnable1[i].setAttribute('disabled','true'); }\n";
+  $GLOBALS["js"].="   }\n";
+  $GLOBALS["js"].="  toEnable2=document.getElementById(in_uid);\n";
+  $GLOBALS["js"].="   toEnable2.style.visibility='visible';\n";
+  $GLOBALS["js"].="   toEnable2.removeAttribute('disabled');\n";
+  $GLOBALS["js"].="  }\n";
+  $GLOBALS["js"].=" };\n";
  }
 
 
@@ -2099,6 +2407,11 @@ function usrmgmt_form($session) {
   return;
   }
 
+ # --------------------------------------------------------------------------
+ # Get user data
+ # --------------------------------------------------------------------------
+
+ # grab user record
  $sql2="SELECT * FROM appusers WHERE uid = '".$session["uid"]."'";
  $statement2=$GLOBALS["dbo2"]->prepare($sql2);
  $results2=$statement2->execute();
@@ -2109,17 +2422,13 @@ function usrmgmt_form($session) {
   }
  $userinfo=$row2;
 
- $sql2="SELECT * FROM sessions WHERE uid = '".$session["uid"]."'";
- $statement2=$GLOBALS["dbo2"]->prepare($sql2);
- $results2=$statement2->execute();
- $session_list=Array();
- while($row=$results2->fetchArray(SQLITE3_ASSOC)) { $session_list[]=$row; };
-
  $is_superuser=isset($session["tag_is_superuser"]);
 
-  htmlout("<form action='".$GLOBALS["scriptname"]."' method=post>");
-  htmlout("<input type='hidden' id='action' name='action' value='modify_my_account' />");
+ # --------------------------------------------------------------------------
+ # All user data gotten
+ # --------------------------------------------------------------------------
 
+  # Basic user info
   output_table_noneditable_container_start();
 
   $htmlout_session_appuser_uid=safe4html($session["appuser-uid"],32);
@@ -2134,21 +2443,13 @@ function usrmgmt_form($session) {
 
   htmlout("<br \>");
 
-  output_table_noneditable_container_start();
- 
-  htmlout("<tr><td colspan=6>".count($session_list)." active session(s)</td></tr>");
-  htmlout("<tr><td colspan=6><table>");
-  foreach($session_list as $session_in_list) {
-   htmloutp("<tr><td>- ".timestamp_to_string($session_in_list["created"]));
-   if($session_in_list["sid"]===$session["sid"]) { htmloutp(" (this session)"); }
-   htmloutp("</td></tr>",1); 
-   }
-  htmlout("</table></td></tr>");
-  output_table_noneditable_container_end();
-
-  htmlout("<br \>");
+  usrmgmt_form_sessions($session,$is_superuser);
+  usrmgmt_form_apikeys($session);
 
   output_table_noneditable_container_start();
+
+  htmlout("<form action='".$GLOBALS["scriptname"]."' method=post>");
+  htmlout("<input type='hidden' id='action' name='action' value='modify_my_account' />");
 
   htmlout("<tr>");
   htmlout("<td class='form-column-header'><label for='reset_password'>Reset Password (Must Enter Old Password)</label></td>");
@@ -2171,6 +2472,104 @@ function usrmgmt_form($session) {
   output_table_noneditable_container_end();
 
  }
+
+function usrmgmt_form_sessions($session,$is_superuser) {
+# Generate session information portion of user management form.
+
+ # Do nothing if basically multiple sessions are not possible.
+ if($GLOBALS["P_MAX_SESSION_COUNT"]<2) { return; }
+
+ # grab sessions
+ $sql2="SELECT * FROM sessions WHERE uid = '".$session["uid"]."'";
+ $statement2=$GLOBALS["dbo2"]->prepare($sql2);
+ $results2=$statement2->execute();
+ $session_list=Array();
+ while($row=$results2->fetchArray(SQLITE3_ASSOC)) { $session_list[]=$row; };
+
+ # Sessions
+ # This is also a GREAT time to check for and drop expired sessions, I guess.
+ $session_count=count($session_list);
+ foreach($session_list as $session_in_list) {
+  if($session_in_list["created"]+86400<time()) {
+   delete_expired_session($session_in_list["sid"]);
+   $session_count--;
+   }
+  }
+ output_table_noneditable_container_start();
+ htmlout("<tr><td colspan=6>".$session_count." active session(s)</td></tr>");
+ htmlout("<tr><td colspan=6>");
+ htmlout("<table>");
+ foreach($session_list as $session_in_list) {
+  htmloutp("<tr><td>- ".timestamp_to_string($session_in_list["created"]));
+  if($session_in_list["sid"]===$session["sid"]) { htmloutp(" (this session)"); }
+  htmloutp("</td></tr>",1); 
+  }
+ htmlout("</table>");
+ htmlout("</td></tr>");
+ output_table_noneditable_container_end();
+
+ htmlout("<br \>");
+ }
+
+function usrmgmt_form_apikeys($session) {
+# Generate API key portion of user management form, if needed.
+
+ # Do nothing if basically API keys are disabled.
+ if($GLOBALS["P_MAX_APIKEY"]>0) { return; } 
+
+ # Grab apikeys
+ $sql2="SELECT * FROM apikeys WHERE owning_uid = '".$session["uid"]."'";
+ $statement2=$GLOBALS["dbo2"]->prepare($sql2);
+ $results2=$statement2->execute();
+ $apikey_list=Array();
+ while($row=$results2->fetchArray(SQLITE3_ASSOC)) { $apikey_list[]=$row; };
+ 
+ # API Keys
+ output_table_noneditable_container_start();
+ htmlout("<tr><td>".count($apikey_list)." API keys</td></tr>");
+
+ foreach($apikey_list as $apikey_in_list) {
+ $htmlout_apikeyname=safe4html($apikey_in_list["apikeyname"]);
+ htmlout("<form action='".$GLOBALS["scriptname"]."' method=post>");
+ htmlout("<input type='hidden' id='action' name='action' value='modify_my_account' />");
+ htmlout("<input type='hidden' id='delete_apikey' name='delete_apikey' value='".$htmlout_apikeyname."' />");
+
+  htmlout("<tr>");
+
+  htmlout("<td style='background-color: blue; text-align: right;'>");
+  htmlout("<button class='rowmethod-button'>Delete</button>");
+  htmlout("</td>");
+
+  htmlout("<td colspan=3>");
+  usrmgmt_form_apikeycard($apikey_in_list);
+  htmlout("</td>");
+
+  htmlout("</tr>");
+  htmlout("</form>");
+  }
+
+ htmlout("</table>");
+ htmlout("<table>");
+
+ # Create API Key
+ htmlout("<form action='".$GLOBALS["scriptname"]."' method=post>");
+ htmlout("<input type='hidden' id='action' name='action' value='modify_my_account' />");
+ htmlout("<tr>");
+ if(count($apikey_list)>($GLOBALS["P_MAX_APIKEY"]-1)) {
+  htmlout("<tr><td colspan=2 class='rowmethod-container'>You can't create a new API key until an existing one is deleted or expires.</td></tr>");
+  } else { 
+  htmlout("<td class='form-column-header'><label for='new_apikey_name'>New API Key Name</label</td>");
+  htmlout("<td class='form-column-data'><input style='width: 98%;' type='text' id='new_apikey_name' name='new_apikey_name' required /></td>");
+  htmlout("</tr>");
+  htmlout("<tr><td colspan=2 class='rowmethod-container'><button class='rowmethod-button'>Create API Key</button></td></tr>");
+  htmlout("</form>");
+  }
+ htmlout("</table></td></tr>");
+ output_table_noneditable_container_end();
+
+ htmlout("<br \>");
+ }
+
 
 function show_form_reset_my_password_form($session) {
 # Password reset form.
@@ -3383,6 +3782,43 @@ function get_html_form_validators( $in_which_table ) {
 
 
 # ----------------------------------------------------------------------------
+# [ Generic input validation ]
+# ----------------------------------------------------------------------------
+
+
+function is_valid_name($in_name) {
+ if($in_name==="") { return false; }
+ $valid_username_characters='@_-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+ for($i=0; $i<strlen($in_name); $i++) {
+  if(str_contains($valid_username_characters,$in_name[$i])) { continue; }
+  return false;
+  break;
+  } 
+ return true;
+ }
+
+
+function is_valid_uuid($in_uuid) {
+ if($in_uuid==="") { return false; }
+ if(strlen($in_uuid)!==36) { return false; }
+ $valid_uuid_characters='0123456789abcdef';
+ $valid_uuid_format='nnnnnnnn-nnnn-nnnn-nnnn-nnnnnnnnnnnn';
+ for($i=0; $i<strlen($valid_uuid_format); $i++) {
+  switch ($valid_uuid_format[$i]) {
+   case "n":
+    if(!str_contains($valid_uuid_characters,$in_uuid[$i])) { return false; }
+    break;
+   case "-":
+    if($in_uuid[$i]!=='-') { return false; }
+    break;
+   }
+  }
+  return true;
+ }
+
+
+
+# ----------------------------------------------------------------------------
 # [ Presentation support ]
 # ----------------------------------------------------------------------------
 
@@ -3753,6 +4189,14 @@ function create_missing_tables() {
 			,failed_logins_consec INTEGER NOT NULL
 			,last_login_attempt TEXT NOT NULL
 			);",
+  "apikeys"	=> "CREATE TABLE apikeys (
+			 apikey TEXT NOT NULL UNIQUE
+			,apikeyname TEXT NOT NULL PRIMARY KEY
+			,created TEXT NOT NULL
+			,owning_uid TEXT NOT NULL
+			,last_accessed TEXT NOT NULL
+			,use_count INTEGER NOT NULL
+			);",
   "apprights"	=> "CREATE TABLE apprights (
 			 uid TEXT NOT NULL
 			,target_table_name TEXT NOT NULL
@@ -3941,7 +4385,7 @@ function log_entry( $in_session
  $i=$i1[0];
 
  # If there are 10 lines in the log ...
- if($i["nlog"]>9) {
+ if($i["nlog"]>($GLOBALS["P_MAX_NLOG"]-1)) {
   # ... oldest log line will fall off.
 
   # Before we kick it out, we have to read it ...
@@ -4270,6 +4714,30 @@ function open_database_2($in_filename) {
   mtrace("DB op: open_database_2($in_filename)");
 
  $GLOBALS["dbo2"]=new SQLite3($in_filename,SQLITE3_OPEN_READONLY);
+ }
+
+
+function row_count($in_which_table, $in_select_col, $in_select_colvalue="") {
+# Does not consult schema
+# Returns count of rows in $in_which_table where $in_select_col match
+# $in_select_colvalue.
+
+ mtrace("DB op: row_count(table:$in_which_table, select_col:$in_select_col, select_colvalue:$in_select_colvalue)");
+
+ $sql="SELECT COUNT(*) FROM ".$in_which_table;
+ if($in_select_colvalue!=="") {
+  $sql.=" WHERE ".$in_select_col." = :in_select_colvalue";
+  }
+ $statement=$GLOBALS["dbo"]->prepare($sql);
+ if($in_select_colvalue!=="") { 
+  $statement->bindValue(":in_select_colvalue",$in_select_colvalue,SQLITE3_TEXT);
+  }
+ $results=$statement->execute();
+ $result_row=Array();
+ $result_row=$results->fetchArray(SQLITE3_ASSOC);
+ if(is_bool($result_row)) { return -1; }
+ if(!isset($result_row["COUNT(*)"])) { return -2; }
+ return $result_row["COUNT(*)"];
  }
 
 
@@ -4921,6 +5389,61 @@ function guidv4($data = null) {
 }
 # ----------------------------------------------------------------------------
 
+
+# ----------------------------------------------------------------------------
+# [ Maintenance ]
+# ----------------------------------------------------------------------------
+
+
+function maintenance(&$array_what_was_done) {
+# Checks everything for consistency and cleans anything that needs to be
+# cleaned.
+ 
+ $error_happened=false;
+
+ do {
+  # internal table ...
+  # nlog should not be more than MAX_NLOG.
+  # superuser_uid should point to an existing user.
+  } while (false);
+
+ do {
+  # log table ...
+  } while (false);
+
+ do {
+  # backref table ...
+  } while (false);
+
+ do {
+  # sessions table ...
+  # Remove sessions pointing to users that no longer exist.
+  # Remove any expired sessions.
+  } while (false);
+
+ do {
+  # appusers table ...
+  } while (false);
+
+ do {
+  # apikeys table ...
+  # Remove apikeys of owners that no longer exist.
+  # Remove any expired API keys.
+  } while (false);
+ 
+ do {
+  # apprights table ...
+  # Remove rights of owners that no longer exist.
+  } while (false);
+
+ do {
+  # uicache table ...
+  } while (false);
+
+ return $error_happened;
+ }
+
+
 # ----------------------------------------------------------------------------
 # [ Style sheet ]
 # ----------------------------------------------------------------------------
@@ -4972,7 +5495,7 @@ function style_sheet() {
  htmlout("label { font-size: 1rem; }");
  htmlout(".form-column-data-new        { font-size: 1rem; padding: 0px 0px 0px 0px; vertical-align: middle; }");
  htmlout(".form-column-data-new-full   { font-size: 1rem; padding: 0px 0px 0px 0px; vertical-align: middle; }");
- htmlout(".non-editable-table { padding: 2px; border-style: solid; border-width: 1px; border-color: black; word-break: break-word; }");
+ htmlout(".non-editable-table { padding: 2px; border-style: solid; border-width: 1px; border-color: black; word-break: break-word; table-layout: fixed; }");
  htmlout("caption.non-editable-table-caption { background-color: #c0c0c0; }");
  htmlout("caption.form-top { text-align: left; font-style: italic; padding: 16px 0px 0px 0px; }");
  htmlout(".return-link { text-align: right; }");
@@ -5003,32 +5526,32 @@ function style_sheet() {
 
 function set_schemadef() {
 $GLOBALS["schemadef"]=Array(
- 'conf/FOR_THIS_APP'		=>  'title:Configuration'
-				   .'/new-form-title:				Configuration'
-				   .'/allow-delete-by:				uuid'
-				   .'/single-row-only'
-				   .'/single-row-only-empty-message:No configuration currently defined'
-		            	    	   .'/friendly-object-name:		    configuration'
-			                 	   .'/instance-friendly-name-is:	uuid'
-			        	           .'/toplink:				        configure'
-					   .'/owner-identified-by:		uuid'
-			                	   ,
- 'conf/uuid'		        	=>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
- 'conf/basefilepath'	    	=>  'req:y/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localdir/form-label:Base File Path/default-value-from-ini:homedir/present-width:full-width',
- 'conf/stdoutfilepath'	    	=>  'req:y/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localdir/form-label:stdout File Path/default-value-from-ini:stdoutdir/present-width:full-width',
+# 'conf/FOR_THIS_APP'			=>  'title:Configuration'
+#					   .'/new-form-title:			Configuration'
+#					   .'/allow-delete-by:			uuid'
+#					   .'/single-row-only'
+#					   .'/single-row-only-empty-message:No configuration currently defined'
+#		            	    	   .'/friendly-object-name:		configuration'
+#					   .'/instance-friendly-name-is:	uuid'
+#					   .'/toplink:				configure'
+#					   .'/owner-identified-by:		uuid'
+#			                	   ,
+# 'conf/uuid'				=>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
+# 'conf/basefilepath'			=>  'req:y/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localdir/form-label:Base File Path/default-value-from-ini:homedir/present-width:full-width',
+# 'conf/stdoutfilepath'			=>  'req:y/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localdir/form-label:stdout File Path/default-value-from-ini:stdoutdir/present-width:full-width',
  # ---------------------------------------------------------------------------
  'rpmap/FOR_THIS_APP'			=>  'title:Locations (Port and Prefix)'
 					   .'/new-form-title:			Define A Port and Prefix Combination'
 					   .'/allow-delete-by:			uuid'
-					   .'/row-must-exist-in:		conf'
-					   .'/must-exist-in-fails-message:	You can&apos;t define a location until you create a configuration.'
+#					   .'/row-must-exist-in:		conf'
+#					   .'/must-exist-in-fails-message:	You can&apos;t define a location until you create a configuration.'
 	            		    	   .'/friendly-object-name:		location'
 	            		    	   .'/instance-friendly-name-is:	number'
 	            	    		   .'/toplink:				        locations'
 					   .'/owner-identified-by:		number'
 	            			       ,
- 'rpmap/pointer_to_conf'	    =>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Under Configuration/dont-show'.
-				                    '/is-pointer-to:conf/pointer-links-by:uuid/shown-by:basefilepath',
+#'rpmap/pointer_to_conf'		=>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Under Configuration/dont-show'.
+#			                    '/is-pointer-to:conf/pointer-links-by:uuid/shown-by:basefilepath',
  'rpmap/uuid'			        =>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
  'rpmap/number'		        	=>  'req:y/type:int/data:port/minval:1024/maxval:  65535/injourney:user-enters-text-for-number/form-label:TCP&#47;IP Port Number/must-be-unique',
  'rpmap/urlprefix'	         	=>  'req:y/type:str/data:url /minlen:   1/maxlen:   1024/injourney:user-enters-text-for-urlprefix/form-label:URL Prefix',
@@ -5036,15 +5559,15 @@ $GLOBALS["schemadef"]=Array(
  'defined/FOR_THIS_APP'			=>  'title:Services'
 		         		   .'/new-form-title:			Define A Service'
 		           		   .'/allow-delete-by:			uuid'
-	            		  	   .'/row-must-exist-in:		conf'
-					   .'/must-exist-in-fails-message:	You can&apos;t create a service until you create a configuration.'
+#	            		  	   .'/row-must-exist-in:		conf'
+#					   .'/must-exist-in-fails-message:	You can&apos;t create a service until you create a configuration.'
 					   .'/friendly-object-name:		service'
 					   .'/instance-friendly-name-is:	name'
 					   .'/toplink:				services'
 					   .'/owner-identified-by:		uuid'
 		            		,
- 'defined/pointer_to_conf'		=>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Under Configuration/dont-show'.
-					    '/is-pointer-to:conf/pointer-links-by:uuid/shown-by:basefilepath',
+#'defined/pointer_to_conf'		=>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Under Configuration/dont-show'.
+#					    '/is-pointer-to:conf/pointer-links-by:uuid/shown-by:basefilepath',
  'defined/uuid'				=>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
  'defined/name'				=>  'req:y/type:str/data:name/minlen:   1/maxlen:     50/injourney:user-enters-text/form-label:Service Name',
  'defined/description'			=>  'req:n/type:str/data:name/minlen:   0/maxlen:   4000/injourney:user-enters-text/form-label:Service Description',
@@ -5073,15 +5596,15 @@ $GLOBALS["schemadef"]=Array(
 					   .'/owner-identified-by:		uuid'
 				           ,
  'running/uuid'				=>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
- 'running/pointer_to_defined'   =>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Instance Of'.
-			            	        '/is-pointer-to:defined/pointer-links-by:uuid/shown-by:name'.
-				                    '/display-using-other-table/display-sql-SELECT:name/display-sql-FROM:defined/display-sql-WHERE:uuid/display-sql-IS:pointer_to_defined',
- 'running/pid'		    	    =>  'req:y/type:int/data:pid /minval:   2/maxval:4194304/injourney:app-generates/form-label:Process ID',
- 'running/localfile'		    =>  'req:n/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localfile/form-label:Local File {LOCALFILE}/present-width:full-width',
- 'running/rpmap'		        =>  'req:n/type:int/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Location (Port and URL Prefix)/must-be-unique'.
-	   			                    '/is-pointer-to:rpmap/pointer-links-by:number/shown-by:number,urlprefix'.
-				                    '/display-using-other-table/display-sql-SELECT:number,urlprefix/display-sql-FROM:rpmap/display-sql-WHERE:number/display-sql-IS:rpmap',
- 'running/lastchecked'	    	=>  'req:n/type:str/data:date/minlen:   0/maxlen:       0/injourney:row-method/form-label:Last Checked',
+ 'running/pointer_to_defined'		=>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Instance Of'.
+					    '/is-pointer-to:defined/pointer-links-by:uuid/shown-by:name'.
+					    '/display-using-other-table/display-sql-SELECT:name/display-sql-FROM:defined/display-sql-WHERE:uuid/display-sql-IS:pointer_to_defined',
+ 'running/pid'				=>  'req:y/type:int/data:pid /minval:   2/maxval:4194304/injourney:app-generates/form-label:Process ID',
+ 'running/localfile'			=>  'req:n/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localfile/form-label:Local File {LOCALFILE}/present-width:full-width',
+ 'running/rpmap'			=>  'req:n/type:int/data:uuid/minlen:  36/maxlen:     36/injourney:user-selects-from-list-in-other-table/form-label:Location (Port and URL Prefix)/must-be-unique'.
+					    '/is-pointer-to:rpmap/pointer-links-by:number/shown-by:number,urlprefix'.
+					    '/display-using-other-table/display-sql-SELECT:number,urlprefix/display-sql-FROM:rpmap/display-sql-WHERE:number/display-sql-IS:rpmap',
+ 'running/lastchecked'			=>  'req:n/type:str/data:date/minlen:   0/maxlen:       0/injourney:row-method/form-label:Last Checked',
  # ---------------------------------------------------------------------------
 # 'maint/FOR_THIS_APP'	    	=>  'title:Maintenance Command Requests'
 #				                   .'/new-form-title:			    Maintenance Request'
@@ -5191,12 +5714,6 @@ function GENERATOR_pid (
  $rrpmap=Array();
  if(!read_row_expecting_just_one($rrpmap,"rpmap","number",$prpmap)) { return false; }
 
- # Defined process also points to a conf.
- # Resolve reference to conf - needed to get stdout path.
- $pconf=$rdefined["pointer_to_conf"];
- $rconf=Array();
- if(!read_row_expecting_just_one($rconf,"conf","uuid",$pconf)) { return false; }
-
  # Start building the command.  It begins with, well, the command.
  $cmd=$rdefined["command"];
 
@@ -5260,8 +5777,8 @@ function GENERATOR_pid (
  $re="";
  if(isset($in_PARAMS["restart"])) { $re="re"; }
 
- # Assemble stdoutpath (path from config, filename from service definition).
- $stdoutpath=path_merge(trim($rconf["stdoutfilepath"]),trim(make_filename_ready($rdefined["name"])."-stdout.txt"));
+ # Assemble stdoutpath (path from ini file, filename from service definition).
+ $stdoutpath=path_merge(trim($in_ini["defaults"]["stdoutdir"]),trim(make_filename_ready($rdefined["name"])."-stdout.txt"));
 
  # We might immediately "remove" the row (actually, not even create it) if the
  # launch is not successful.  So, we'll need these ...
@@ -5465,20 +5982,13 @@ function ROWMETHOD_stdout_running (
  $rrunning=Array();
  if(!read_row_expecting_just_one($rrunning,$in_target_table,"uuid",$in_target)) { return false; }
 
- # Running process also points to a defined process.
  # Resolve that too...
  $pdefined=$rrunning["pointer_to_defined"];
  $rdefined=Array();
  if(!read_row_expecting_just_one($rdefined,"defined","uuid",$pdefined)) { return false; }
 
- # Defined process also points to a conf.
- # We really need that.
- $pconf=$rdefined["pointer_to_conf"];
- $rconf=Array(); 
- if(!read_row_expecting_just_one($rconf,"conf","uuid",$pconf)) { return false; }
-
- # Assemble stdoutpath (path from config, filename from service definition).
- $stdoutpath=path_merge(trim($rconf["stdoutfilepath"]),trim(make_filename_ready($rdefined["name"])."-stdout.txt"));
+ # Assemble stdoutpath (path from ini file, filename from service definition).
+ $stdoutpath=path_merge(trim($in_ini["defaults"]["stdoutdir"]),trim(make_filename_ready($rdefined["name"])."-stdout.txt"));
 
  $GLOBALS["extra_goodies"].="<div class='stdout-top'>Last 50 lines of captured <tt>stdout</tt>:</div>\n";
  $GLOBALS["extra_goodies"].="<textarea rows=25 class='stdout'>";
