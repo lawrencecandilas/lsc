@@ -14,19 +14,23 @@ ini_set('display_errors','On');
 # - Callables
 #
 #   All of these really should be separate files but they're all combined here
-#   for simplicity of use.'
+#   for simplicity of use.
+
 
 # ----------------------------------------------------------------------------
 # == = = = = = = = = = = = = = = = = MAIN = = = = = = = = = = = = = = = = = ==
 # ----------------------------------------------------------------------------
 
+
 # Internal configuration constants
+$GLOBALS["P_APP_NAME"]="lsc";
+$GLOBALS["P_TITLE"]="lsc";
 $GLOBALS["P_MAX_NLOG"]=10;
 $GLOBALS["P_MAX_SESSION_COUNT"]=5;
 $GLOBALS["P_MAX_SESSION_DURATION"]=86400;
-$GLOBALS["P_MAX_APIKEY"]=3;
+$GLOBALS["P_MAX_APIKEY_COUNT"]=3;
 $GLOBALS["P_MAX_APIKEY_NAME_LENGTH"]=16;
-$GLOBALS["P_MAX_USERS"]=10;
+$GLOBALS["P_MAX_USER_COUNT"]=10;
 $GLOBALS["P_MAX_USERNAME_LENGTH"]=32;
 
 set_schemadef();
@@ -58,7 +62,22 @@ $ACTION=validate_action(@$_POST["action"]);
 # Get and validate "format" query string from HTTP request.
 # - validate_output_format() will populate a default output format if
 #   needed--html--or set it to html if an unsupported format is requested.
+# May be overwritten below if an API key is provided but no format is
+# specified.
 $GLOBALS["output_format"]=validate_output_format(@$_GET["format"]);
+
+# Get and validate any provided API key.
+$APIKEY="";
+if(isset($_SERVER['HTTP_X_API_KEY']) and $GLOBALS["P_MAX_APIKEY_COUNT"]>0) {
+ $APIKEY=$_SERVER['HTTP_X_API_KEY'];
+ # Force text format if html was specified.
+ if($GLOBALS["output_format"]==='html') { $GLOBALS["output_format"]='text'; }
+ if(!is_valid_uuid($APIKEY)) { 
+  $APIKEY=""; merr("API key not accepted");
+  }
+ }
+
+# Output buffer setup for the current format.
 output_buffer_setup($GLOBALS["output_format"]);
 
 # Safety: Only set $ini_file if not UID 0.
@@ -79,15 +98,18 @@ $table="none";
 $session=Array();
 $connected=false;
 
-# Incoming HTTP requests without session cookies force the action to be 
-# "not_authenticated" if the action isn't "login."
-#
-# The action "not_authenticated" will show the login form, along with a
-# button that calls the "login" action. 
-#
-# TODO: Handle API keys for non-HTTP formats
-if(!isset($_COOKIE["sid"])) {
+# If there is no session cookie, and there is no API key, then we are dealing
+# with an unauthenticated user, and will force the action to "login."  This
+# will make the user see nothing but the login form.
+if(!isset($_COOKIE["sid"]) and ($APIKEY==="")) {
  if($ACTION!=="login"){$ACTION="not_authenticated";} 
+ }
+# If there IS a session cookie, there should NOT be an API key. If there is
+# that's an error.
+if(isset($_COOKIE["sid"]) and ($APIKEY!=="")) {
+ unset($_COOKIE["sid"]);
+ merr("This application will not process API requests if a 'sid' session cookie is also part of the request");
+ $ACTION="not_authenticated"; 
  }
 
 # ----------------------------------------------------------------------------
@@ -123,7 +145,7 @@ switch ($ACTION) {
    if(any_errors()) { break; }
   begin_sql_transaction();
    if(any_errors()) { break; }
-  $connected=connect_session(@$_COOKIE["sid"],$session);
+  $connected=connect_session(@$_COOKIE["sid"],$session,$APIKEY);
   if((!$connected) or any_errors()) { $ACTION="not_authenticated"; break; }
    if(modify_action_for_redirect($ACTION,$session)) { break; }
   validate_data_array($P["table"],$ARRAY_IN_DATA);
@@ -158,7 +180,9 @@ switch ($ACTION) {
  # ---------------------------------------------------------------------------
  case "delete_row": 
  # ---------------------------------------------------------------------------
-  $P=Array("table"=>"","target"=>"");
+  $P=Array( "table"=>""
+           ,"target"=>""
+           );
    find_and_sanitize_incoming($_POST,Array(),$P);
    is_table_known($P["table"]);
    if(any_errors()) { break; }
@@ -176,7 +200,7 @@ switch ($ACTION) {
    if(any_errors()) { break; }
   begin_sql_transaction();
    if(any_errors()) { break; }
-  $connected=connect_session(@$_COOKIE["sid"],$session);
+  $connected=connect_session(@$_COOKIE["sid"],$session,$APIKEY);
   if((!$connected) or any_errors()) { $ACTION="not_authenticated"; break; }
    if(modify_action_for_redirect($ACTION,$session)) { break; }
   $deleteable=set_report_names_for_delete($P["table"],$P["target"]);
@@ -199,7 +223,12 @@ switch ($ACTION) {
  # ---------------------------------------------------------------------------
  case "row_method_action":
  # ---------------------------------------------------------------------------
-  $P=Array("table"=>"","target"=>"","target_table"=>"optional","row_method"=>"","return_to"=>"optional");
+  $P=Array( "table"=>""
+           ,"target"=>""
+           ,"target_table"=>"optional"
+           ,"row_method"=>""
+           ,"return_to"=>"optional"
+           );
    find_and_sanitize_incoming($_POST,Array(),$P);
    is_table_known($P["table"]);
    if(any_errors()) { break; }
@@ -211,7 +240,7 @@ switch ($ACTION) {
    if(any_errors()) { break; }
   begin_sql_transaction();
    if(any_errors()) { break; }
-  $connected=connect_session(@$_COOKIE["sid"],$session);
+  $connected=connect_session(@$_COOKIE["sid"],$session,$APIKEY);
   if((!$connected) or any_errors()) { $ACTION="not_authenticated"; break; }
    if(modify_action_for_redirect($ACTION,$session)) { break; }
   if($P["target_table"]==="optional") { $P["target_table"]=$P["table"]; }
@@ -230,7 +259,7 @@ switch ($ACTION) {
  case "show":
  # ---------------------------------------------------------------------------
   $P=Array("table"=>"none");
-   find_and_sanitize_incoming(Array(),$_GET,$P);
+   find_and_sanitize_incoming($_POST,$_GET,$P);
    is_table_known($P["table"]);
    if(any_errors()) { break; }
    $table=$P["table"];
@@ -243,7 +272,7 @@ switch ($ACTION) {
    if(any_errors()) { break; }
   begin_sql_transaction(); # required in case cookies are invalidated.
    if(any_errors()) { break; }
-  $connected=connect_session(@$_COOKIE["sid"],$session);
+  $connected=connect_session(@$_COOKIE["sid"],$session,$APIKEY);
   if((!$connected) or any_errors()) { $ACTION="not_authenticated"; break; }
    if(modify_action_for_redirect($ACTION,$session)) { break; }
   break;
@@ -262,7 +291,7 @@ switch ($ACTION) {
    if(any_errors()) { break; }
   begin_sql_transaction();
    if(any_errors()) { break; }
-  $connected=connect_session(@$_COOKIE["sid"],$session);
+  $connected=connect_session(@$_COOKIE["sid"],$session,$APIKEY);
   if((!$connected) or any_errors()) { $ACTION="not_authenticated"; break; }
    if(modify_action_for_redirect($ACTION,$session)) { break; }
   delete_all_rows_bypass_schema("log");
@@ -281,8 +310,13 @@ switch ($ACTION) {
  # ---------------------------------------------------------------------------
  case "login":
  # ---------------------------------------------------------------------------
-  $P=Array("table"=>"none","username"=>"","password"=>"");
+  $P=Array( "table"=>"none"
+           ,"username"=>""
+           ,"password"=>""
+           );
    find_and_sanitize_incoming($_POST,Array(),$P);
+   if(any_errors()) { break; }
+  bounce_apikey($APIKEY);
    if(any_errors()) { break; }
   $ini=Array(); $ini=ingest_ini($ini_file);
    if(any_errors()) { break; }
@@ -316,17 +350,20 @@ switch ($ACTION) {
    find_and_sanitize_incoming(Array(),$_GET,$P);
    is_table_known($P["table"]);
    if(any_errors()) { break; }
+  bounce_apikey($APIKEY);
+   if(any_errors()) { break; }
   $ini=Array(); $ini=ingest_ini($ini_file);
    if(any_errors()) { break; }
   open_database($ini["database"]["name"]);
    if(any_errors()) { break; }
   begin_sql_transaction();
    if(any_errors()) { break; }
-  $connected=connect_session(@$_COOKIE["sid"],$session);
+  # API key not passed here on purpose. Logout is an HTTP UI function only.
+  $connected=connect_session(@$_COOKIE["sid"],$session,"");
   if((!$connected) or any_errors()) { $ACTION="not_authenticated"; break; }
   invalidate_session($_COOKIE["sid"]);
   $GLOBALS["sqltxn_commit"]=true;
-   mnotice("Thank you for using lsc - you have been logged out","");
+   mnotice("Logged out - thank you for using ".$GLOBALS["P_APP_NAME"],"");
   quietly_log_new_sql_txn(true,$session,"Logged out","");
   # Logout successful at this point.
   $ACTION="not_authenticated";
@@ -336,12 +373,14 @@ switch ($ACTION) {
  case "adm_modify_user_table":
  # ---------------------------------------------------------------------------
   $P=Array( "table"				=>"none"
-	   ,"modusertable_action"		=>"optional"
- 	   ,"modusertable_new_username"		=>"optional"
- 	   ,"modusertable_existing_uid"		=>"optional"
-	   );
+	       ,"modusertable_action"		=>"optional"
+ 	       ,"modusertable_new_username"	=>"optional"
+ 	       ,"modusertable_existing_uid"	=>"optional"
+	       );
    find_and_sanitize_incoming($_POST,Array(),$P);
    is_table_known($P["table"]);
+   if(any_errors()) { break; }
+  bounce_apikey($APIKEY);
    if(any_errors()) { break; }
   $ini=Array(); $ini=ingest_ini($ini_file);
    if(any_errors()) { break; }
@@ -349,7 +388,7 @@ switch ($ACTION) {
    if(any_errors()) { break; }
   begin_sql_transaction();
    if(any_errors()) { break; }
-  $connected=connect_session(@$_COOKIE["sid"],$session);
+  $connected=connect_session(@$_COOKIE["sid"],$session,$APIKEY);
   if((!$connected) or any_errors()) { $ACTION="not_authenticated"; break; }
    if(modify_action_for_redirect($ACTION,$session)) { break; }
   process_modusertable_request($session,$P);
@@ -359,7 +398,14 @@ switch ($ACTION) {
  # ---------------------------------------------------------------------------
  case "modify_my_account":
  # ---------------------------------------------------------------------------
-  $P=Array("table"=>"none","delete_apikey"=>"","new_apikey_name"=>"","reset_password"=>"","random_password"=>"","kill_sessions"=>"","disable_account"=>"");
+  $P=Array( "table"				=>"none"
+           ,"delete_apikey"			=>""
+           ,"new_apikey_name"			=>""
+           ,"reset_password"			=>""
+           ,"random_password"			=>""
+           ,"kill_sessions"			=>""
+           ,"disable_account"			=>""
+           );
    find_and_sanitize_incoming($_POST,Array(),$P);
    is_table_known($P["table"]);
    if(any_errors()) { break; }
@@ -369,7 +415,7 @@ switch ($ACTION) {
    if(any_errors()) { break; }
   begin_sql_transaction();
    if(any_errors()) { break; }
-  $connected=connect_session(@$_COOKIE["sid"],$session);
+  $connected=connect_session(@$_COOKIE["sid"],$session,$APIKEY);
   if((!$connected) or any_errors()) { $ACTION="not_authenticated"; break; }
    if(modify_action_for_redirect($ACTION,$session)) { break; }
   modify_my_account($session,$P);
@@ -379,9 +425,14 @@ switch ($ACTION) {
  # ---------------------------------------------------------------------------
  case "modify_my_password":
  # ---------------------------------------------------------------------------
-  $P=Array("table"=>"none","old_password"=>"","new_password"=>"");
+  $P=Array( "table"=>"none"
+           ,"old_password"=>""
+           ,"new_password"=>""
+           );
    find_and_sanitize_incoming($_POST,Array(),$P);
    is_table_known($P["table"]);
+   if(any_errors()) { break; }
+  bounce_apikey($APIKEY);
    if(any_errors()) { break; }
   $ini=Array(); $ini=ingest_ini($ini_file);
    if(any_errors()) { break; }
@@ -389,7 +440,7 @@ switch ($ACTION) {
    if(any_errors()) { break; }
   begin_sql_transaction();
    if(any_errors()) { break; }
-  $connected=connect_session(@$_COOKIE["sid"],$session);
+  $connected=connect_session(@$_COOKIE["sid"],$session,$APIKEY);
   if((!$connected) or any_errors()) { $ACTION="not_authenticated"; break; }
   $successful=modify_my_password($session,$P["old_password"],$P["new_password"]);
    if(!$successful) { break; }
@@ -407,13 +458,16 @@ switch ($ACTION) {
    find_and_sanitize_incoming(Array(),$_GET,$P);
    is_table_known($P["table"]);
    if(any_errors()) { break; }
+  bounce_apikey($APIKEY);
+   if(any_errors()) { break; }
   $ini=Array(); $ini=ingest_ini($ini_file);
    if(any_errors()) { break; }
   open_database($ini["database"]["name"]);
    if(any_errors()) { break; }
   begin_sql_transaction();
    if(any_errors()) { break; }
-  $connected=connect_session(@$_COOKIE["sid"],$session);
+  # API key not passed here on purpose. Forms are an HTTP UI function only.
+  $connected=connect_session(@$_COOKIE["sid"],$session,"");
   if((!$connected) or any_errors()) { $ACTION="not_authenticated"; break; }
    if(modify_action_for_redirect($ACTION,$session)) { break; }
   break;
@@ -437,6 +491,9 @@ switch ($ACTION) {
  # ---------------------------------------------------------------------------
   # we do not call open_database() here on purpose.
   $P["table"]="none";
+  if($ACTION!=="not_authenticated") {
+   merr("This application doesn't know how to '".$ACTION."'");
+   } 
   break;
  }
 
@@ -495,7 +552,7 @@ switch ($ACTION) {
   history_panel_end();
   break; 
  case "show":
-  if($table=="none") { null_request(); break; }
+  if($table==="none") { null_request(); break; }
   if(any_errors()) { 
    content_panel_start($table,$ACTION);
     output_messages();
@@ -510,25 +567,25 @@ switch ($ACTION) {
   open_database_2($ini["database"]["name"]);
   content_panel_start($table,$ACTION); 
    output_messages();
-   output_table_noneditable($table,$rows);
-   output_new_form($table,count($rows),$ini);
+   show_table($table,$rows);
+   show_form_new_row($table,count($rows),$ini);
    content_panel_end();
   history_panel_start();
-  output_log($return_link);
+  show_action_history($return_link);
   history_panel_end();
   break;
  case "show_form_my_account":
   open_database_2($ini["database"]["name"]);
   content_panel_start_full("none",$ACTION);
    output_messages();
-   usrmgmt_form($session);
+   show_form_usrmgmt($session);
    content_panel_end();
   break;
  case "show_form_user_management":
   open_database_2($ini["database"]["name"]);
   content_panel_start_full("none",$ACTION);
    output_messages();
-   usrmgmt_admin_form($session);
+   show_form_usrmgmt_admin($session);
    content_panel_end();
   break;
  case "show_form_reset_my_password":
@@ -540,7 +597,7 @@ switch ($ACTION) {
  case "not_authenticated":
   content_panel_start_full("none",$ACTION);
    output_messages();
-   login_form();
+   show_form_login();
    content_panel_end();
   break;
  default:
@@ -643,13 +700,6 @@ exit;
 # Security model is mostly implemeted here.
 # ----------------------------------------------------------------------------
 
-#  "apprights"	=> "CREATE TABLE apprights (
-#			 uid TEXT NOT NULL
-#			,target_table_name TEXT NOT NULL
-#			,target_row_identifier TEXT NOT NULL
-#			,owns INTEGER NOT NULL
-#			);",
-
 
 function resolve_deleteby_to_owneridby($in_table,$in_target_row) {
 # This is needed by the "delete_row" method because:
@@ -663,17 +713,14 @@ function resolve_deleteby_to_owneridby($in_table,$in_target_row) {
  $table_metadata=schema_rowattr($in_table.'/FOR_THIS_APP');
  if(!isset($table_metadata["allow-delete-by"])) { return $in_target_row; }
  if(!isset($table_metadata["owner-identified-by"])) { return $in_target_row; }
-
  $allow_delete_columnname=$table_metadata["allow-delete-by"];
  $owneridby_columnname=$table_metadata["owner-identified-by"];
-
  $sql="SELECT * FROM ".$in_table." WHERE ".$allow_delete_columnname." = :in_target";
   mtrace("sql: \"$sql\"");
  $statement=$GLOBALS["dbo"]->prepare($sql);
  $statement->bindValue(":in_target",$in_target_row,SQLITE3_TEXT);
   mtrace("parameters: in_target=\"$in_target_row\"");
  $results=$statement->execute();
- $out="";
  while($row=$results->fetchArray(SQLITE3_ASSOC)) {
   $out=$row[$owneridby_columnname];
   break;
@@ -688,13 +735,12 @@ function check_rights($in_session,$in_table,$in_target_row,$in_action,$in_subact
 # - Superuser will always be approved.
  
  if(!isset($in_session["sid"])) { 
-  merr("Authorization required, which only works if you are logged in");
-  return false; 
+  merr("Please log in and try again"); return false; 
   }
 
  $superuser_uid=intvar("superuser_uid");
  if($superuser_uid==="") {
-  merr("Cannot read internal variable 'superuser_uid'");
+  merr("Database error: Cannot read internal variable 'superuser_uid'");
   return false;
   }
 
@@ -710,7 +756,7 @@ function check_rights($in_session,$in_table,$in_target_row,$in_action,$in_subact
  $table_metadata=schema_rowattr($in_table.'/FOR_THIS_APP');
  if(!isset($table_metadata["owner-identified-by"])) {
   # Policy: Only superuser can do things to tables that don't take rights.
-  merr("Not authorized - Only the superuser can perform this action on objects in tables that don't track rights"); 
+  merr("Not authorized: Only the superuser can perform this action on objects in tables that don't track rights"); 
   return false;
   }
 
@@ -719,14 +765,16 @@ function check_rights($in_session,$in_table,$in_target_row,$in_action,$in_subact
  
  $existing_rights=read_table_filtered_rows("apprights","target_row_identifier",$in_target_row);
  if(any_db_error()) { 
-  merr("Database error: unable to read apprights table");
+  merr("Database error: Unable to read apprights table");
   return false;
   }
+
  if(count($existing_rights)==0) {
   # Policy: Only superuser can do things to tables that have no rights assigned. 
-  merr("Not authorized - Only the superuser can perform this action on objects with an empty rights table"); 
+  merr("Not authorized: Only the superuser can perform this action on objects with an empty rights table"); 
   return false;
   }
+
  $found_owns=0;
  foreach($existing_rights as $existing_right) {
   # Searching for any rights that represet ownership.
@@ -736,12 +784,13 @@ function check_rights($in_session,$in_table,$in_target_row,$in_action,$in_subact
    if($in_session["uid"]===$existing_right["uid"]) { return true; }
    }
   }
+
  if($found_owns==0) {
   # Policy: Only superuser can do things to tables that don't have owners.
-  merr("Not authorized - Only the superuser can perform this action on objects without owners"); 
+  merr("Not authorized: Only the superuser can perform this action on objects without owners"); 
   return false;
   } else {
-  merr("Not authorized - you don't own this object"); 
+  merr("Not authorized: You don't own this object"); 
   return false;
   } 
  }
@@ -755,8 +804,7 @@ function claim_rights($in_session,$in_table,$in_array_data) {
 # - Returns true if successful, merr()'s and returns false if it fails.
 
  if(!isset($in_session["sid"])) { 
-  merr("Missing session ID - cannot claim rights");
-  return false; 
+  merr("Please log in and try again"); return false; 
   }
 
  # Must find key column of $in_target_row
@@ -765,11 +813,12 @@ function claim_rights($in_session,$in_table,$in_array_data) {
   # Policy: Only superuser can do things to tables that don't take rights.
   $superuser_uid=intvar("superuser_uid");
   if($superuser_uid==="") {
-   merr("Cannot read internal variable 'superuser_uid'");
+   merr("Database error: Cannot read internal variable 'superuser_uid'");
    return false;
    }
+
   if($in_session["uid"]===$superuser_uid) { return true; }
-  merr("Not authorized - only the superuser can perform this action on unownable objects"); 
+  merr("Not authorized: Only the superuser can perform this action on unownable objects"); 
   return false;
   }
 
@@ -781,7 +830,7 @@ function claim_rights($in_session,$in_table,$in_array_data) {
  $rights_data["owns"]=1;
  insert_row("apprights",$rights_data);
  if(any_db_error()) { 
-  merr("Database error: unable to update apprights table");
+  merr("Database error: Unable to update apprights table");
   return false;
   }
 
@@ -792,7 +841,7 @@ function claim_rights($in_session,$in_table,$in_array_data) {
  $uicache_data["uidata"]="owner: ".$in_session["appuser-uid"];
  insert_row("uicache",$uicache_data);
  if(any_db_error()) { 
-  merr("Database error: unable to update apprights table");
+  merr("Database error: Unable to update apprights table");
   return false;
   }
  return true;
@@ -806,33 +855,27 @@ function waive_rights($in_session,$in_table,$in_target_row) {
 # Returns true if successful, merr()'s and returns false if it fails.
 
  if(!isset($in_session["sid"])) { 
-  merr("Missing session ID - cannot waive rights");
-  return false; 
+  merr("Please log in and try again"); return false; 
   }
 
  # Must find key column of $in_target_row
  $table_metadata=schema_rowattr($in_table.'/FOR_THIS_APP');
  if(!isset($table_metadata["owner-identified-by"])) {
   # Policy: Only superuser can do things to tables that don't take rights.
-  merr("Not authorized - Only the superuser can perform this action on objects in tables that don't track rights"); 
+  merr("Not authorized: Only the superuser can perform this action on objects in tables that don't track rights"); 
   return false;
   }
-
- # $find_owner_using_this=$table_metadata["owner-identified-by"];
 
  delete_row_bypass_schema("apprights","target_row_identifier",$in_target_row);
  if(any_db_error()) { 
-  merr("Database error: unable to update apprights table");
-  return false;
+  merr("Database error: unable to update apprights table"); return false;
   }
  delete_row_bypass_schema("uicache","objid2",$in_target_row);
  if(any_db_error()) { 
-  merr("Database error: unable to update apprights table");
-  return false;
+  merr("Database error: Unable to update apprights table"); return false;
   }
 
  return true;
-
  }
 
 
@@ -849,18 +892,14 @@ function authenticate_api_key($in_apikey,&$out_userinfo) {
  # NO authentication if app is disabled.
  # We should not even get here, but doesn't hurt to check.
  if($GLOBALS["disabled"]) { 
-  merr("API key authentications can't be processed while the application is not accepting requests");
-  return "";
+  merr("The application is currently not accepting requests"); return "";
   }
 
  # Deal with any total garbage we happen to get.
  $wtf=false;
  if($in_apikey===""){ $wtf=true; }
- # TODO: Verify api key is a properly formatted UUID.
- if($wtf) {
-  merr("No API key provided","hack");
-  return "";
-  }
+ if(!is_valid_uuid($in_apikey)) { $wtf=true; }
+ if($wtf) { merr("No API key provided"); return ""; }
 
  $need_to_update_apikey_record=false;
  $apikey_accepted=false;
@@ -870,8 +909,7 @@ function authenticate_api_key($in_apikey,&$out_userinfo) {
  $existing_apikey_record=Array();
  $result=read_row_expecting_just_one($existing_apikey_record,"apikeys","apikey",$in_apikey);
  if(any_db_error()) { 
-  merr("Unable to read apikeys table - if you keep seeing this message try again later");
-  return "";
+  merr("Database error: Unable to read apikeys table"); return "";
   }
 
  do {
@@ -892,8 +930,7 @@ function authenticate_api_key($in_apikey,&$out_userinfo) {
  if(!$apikey_accepted) { 
   # Potential bad actor doesn't need to know why we're not accepting the key.
   merr("API key not accepted");
-  $GLOBALS["outmsgs"]["notices"]=Array();
-  return "";
+  $GLOBALS["outmsgs"]["notices"]=Array(); return "";
   }
 
  # At this point, we have a known API key.
@@ -907,10 +944,8 @@ function authenticate_api_key($in_apikey,&$out_userinfo) {
  $existing_appuser=Array();
  $result=read_row_expecting_just_one($existing_appuser,"appusers","uid",$owning_uid);
  if(any_db_error()) { 
-  merr("Unable to read appusers table - if you keep seeing this message try again later");
-  return "";
+  merr("Database error: Unable to read appusers table"); return "";
   }
-
  do {
   # If database returned no data, username doesn't refer to a user that exists.
   # We won't tell the end user that, though (see message issued below).
@@ -927,32 +962,31 @@ function authenticate_api_key($in_apikey,&$out_userinfo) {
   } while (false);
 
  if($need_to_update_apikey_record) {
-  update_row("apikey",$existing_apikey_record,"apikey",$in_apikey);
+  update_row("apikeys",$existing_apikey_record,"apikey",$in_apikey);
   }
 
  if($need_to_delete_apikey_record) { 
   # Keys that don't point to existing users are deleted on sight.
-  delete_row_bypass_schema("apikey","apikey",$in_apikey);
+  delete_row_bypass_schema("apikeys","apikey",$in_apikey);
   }
 
  if(any_db_error()) {
-  merr("Database error: unable to update apikey table - if you keep seeing this message try again later");
-  return "";
+  merr("Database error: Unable to update apikeys table"); return "";
   } 
 
  if(!$accepted) { 
   # Potential bad actor doesn't need to know why we're not accepting the key.
   merr("API key not accepted");
-  $GLOBALS["outmsgs"]["notices"]=Array();
-  return "";
+  $GLOBALS["outmsgs"]["notices"]=Array(); return "";
   }
 
  # At this point, authentication is completed.
  # Forwarding this data ...
- $out_userinfo["uid"]=$existing_user["uid"];
- $out_userinfo["username"]=$existing_user["username"];
+
+ $out_userinfo["uid"]=$existing_appuser["uid"];
+ $out_userinfo["username"]=$existing_appuser["username"];
  # Add a tag to indicate authentication type to the outgoing user data array.
- $out_userinfo["authtype"]="password";
+ $out_userinfo["authtype"]="apikey";
  return $existing_appuser["uid"];
  }
 
@@ -965,8 +999,7 @@ function authenticate($in_username,$in_password,&$out_userinfo) {
  # NO authentication if app is disabled.
  # We should not even get here, but doesn't hurt to check.
  if($GLOBALS["disabled"]) { 
-  merr("Logins can't be processed while the application is not accepting requests","hack");
-  return "";
+  merr("The application is currently not accepting requests","hack"); return "";
   }
 
  # Deal with any total garbage we happen to get.
@@ -987,8 +1020,7 @@ function authenticate($in_username,$in_password,&$out_userinfo) {
  $existing_appuser=Array();
  $result=read_row_expecting_just_one($existing_appuser,"appusers","username",$in_username);
  if(any_db_error()) { 
-  merr("Unable to read appusers table - if you keep seeing this message try again later");
-  return "";
+  merr("Database error: Unable to read appusers table"); return "";
   }
 
  do {
@@ -1047,10 +1079,10 @@ function authenticate($in_username,$in_password,&$out_userinfo) {
    $changed_rows["superuser_uid"]=$new_superuser_uid;
   update_row("internal",$changed_rows,"rowid",1);
   if(any_db_error()) {
-   merr("Database error: unable to update internal table - if you keep seeing this message try again later");
+   merr("Database error: Unable to update internal table");
    return "";
    }
-  mnotice("This is a new instance of lsc.php! A new database has been successfully created");
+  mnotice("New instance detected - created new database");
   }
 
  # Note that user record is updated on failed login to update the failed login
@@ -1058,7 +1090,7 @@ function authenticate($in_username,$in_password,&$out_userinfo) {
  if($need_to_update_user_record) {
   update_row("appusers",$existing_appuser,"username",$in_username);
   if(any_db_error()) {
-   merr("Database error: unable to update appusers table - if you keep seeing this message try again later");
+   merr("Database error: Unable to update appusers table");
    return "";
    } 
   }
@@ -1087,7 +1119,7 @@ function make_session($in_uid,&$session,$in_forcing_password_reset=false) {
  # NO sessions if app is disabled.
  # We should not even get here, but doesn't hurt to check.
  if($GLOBALS["disabled"]) { 
-  merr("New sessions can't be created while the application is not accepting requests","hack");
+  merr("The application is currently not accepting requests","hack");
   return "";
   }
 
@@ -1105,7 +1137,7 @@ function make_session($in_uid,&$session,$in_forcing_password_reset=false) {
 		   );
  $superuser_uid=intvar("superuser_uid");
  if($superuser_uid==="") {
-  merr("Cannot read internal variable 'superuser_uid'");
+  merr("Database error: Cannot read internal variable 'superuser_uid'");
   return;
  }
 
@@ -1126,7 +1158,7 @@ function make_session($in_uid,&$session,$in_forcing_password_reset=false) {
 
  insert_row("sessions",$new_session); 
  if(any_db_error()) { 
-  merr("Unable to create a new session.");
+  merr("Database error: Unable to create a new session");
   return;
   }
 
@@ -1139,6 +1171,8 @@ function make_session($in_uid,&$session,$in_forcing_password_reset=false) {
 
 function connect_session($in_cookie_sid,&$session,$in_apikey="") {
 # Checks if session exists, and if it does, if its valid.
+# This will also validate API key-based requests and make a fake session for
+# them.
 # * If session is good, sid and uid entered into provided associative array
 # and true is returned.
 # * If session doesn't exist or isn't connected for some reason, an merr() may
@@ -1147,11 +1181,7 @@ function connect_session($in_cookie_sid,&$session,$in_apikey="") {
  # NO sessions if app is disabled.
  # We should not even get here, but doesn't hurt to check.
  if($GLOBALS["disabled"]) { 
-  if($in_apikey!=="") {
-   merr("The application is not currently accepting requests - unable to process API requests");
-  } else {
-   merr("The application is not currently accepting requests - unable to connect existing sessions");
-  } 
+  merr("This application is not currently accepting requests");
   return false;
   }
 
@@ -1160,7 +1190,9 @@ function connect_session($in_cookie_sid,&$session,$in_apikey="") {
   # should come from the web UI, then things are different.
   $apikey_owner_data=Array();
   $apikey_owner_uid=authenticate_api_key($in_apikey,$apikey_owner_data);
-  if($userinfo==="") { return false; } 
+  if($apikey_owner_uid==="") { 
+   return false;
+   }
   $session["sid"]="apicall:".$in_apikey;
   $session["uid"]=$apikey_owner_uid;
   $session["created"]=time();
@@ -1187,13 +1219,12 @@ function connect_session($in_cookie_sid,&$session,$in_apikey="") {
   }
 
  if(any_db_error()) { 
-  merr("Unable to read session table.");
-  return false;
+  merr("Database error: Unable to read session table"); return false;
  }
 
  # Bounce if sid not found in table.
  if($result===false) {
-  mnotice("Session expired"); mnotice("Please log in again");
+  mnotice("Session expired"); mnotice("Please log in and try again");
   # Invalidate just in case.
   invalidate_session($in_cookie_sid);
   return false;
@@ -1201,14 +1232,14 @@ function connect_session($in_cookie_sid,&$session,$in_apikey="") {
  # Don't use (and invalidate) session if expired.
  if(($existing_session["created"]+$GLOBALS["P_MAX_SESSION_DURATION"])<time()) {
   invalidate_session($in_cookie_sid);
-  mnotice("Session expired"); mnotice("Please log in again");
+  mnotice("Session expired"); mnotice("Please log in and try again");
   return false;
   }
  # Now see if uid exists in user table.
  $existing_user=Array();
  $result=read_row_expecting_just_one($existing_user,"appusers","uid",$existing_session["uid"]);
- if(any_db_error()) { merr("Unable to read appusers table"); return; }
- if($result===false) { merr("Your account was removed."); return; }
+ if(any_db_error()) { merr("Database error: Unable to read appusers table"); return; }
+ if($result===false) { merr("Account not found"); return; }
 
  $session=$existing_session;
  unpack_raw_session_tags($session);
@@ -1227,7 +1258,7 @@ function invalidate_session($in_cookie_sid) {
  setcookie("sid","",(time()+$GLOBALS["P_MAX_SESSION_DURATION"]));
  delete_row_bypass_schema("sessions","sid",$in_cookie_sid);
  if(any_db_error()) { 
-  merr("Database error: unable to update session table");
+  merr("Database error: Unable to update session table");
   return;
   }
  }
@@ -1237,7 +1268,7 @@ function delete_expired_session($in_cookie_sid) {
 # Deletes row with matching sid from sessions table.
 # Will not set current cookie because it is assumed it is not the current
 # session.
-# Does not call merr() on error.
+# Does not call merr() on error on purpose.
  delete_row_bypass_schema("sessions","sid",$in_cookie_sid);
  }
 
@@ -1255,7 +1286,7 @@ function kill_all_other_sessions($in_session=Array("uid"=>0)) {
  $statement->bindValue(":y",$in_session["sid"],SQLITE3_TEXT);
  $results=$statement->execute();
  if(any_db_error()) {
-  merr("Database error: unable to update session table. No sessions were logged out");
+  merr("Database error: Unable to update session table");
   return false;
   }
  mnotice("Any other sessions were automatically logged out");
@@ -1387,19 +1418,16 @@ function process_modusertable_request(&$in_session,$in_array_data) {
 # issuing commands targeting, and deleting user accounts.
 
  # Validate input
- 
-
  if($GLOBALS["output_format"]!=="html") { return; } # HTML format only.
+ 
  # Valid session required.
  if(!isset($in_session["appuser-uid"])) { 
-  merr("Session expired - please log in to continue'"); 
-  return;
+  merr("Please log in and try again"); return false;
   }
  # Only superuser can issue modusertable requests.
  $superuser_uid=intvar("superuser_uid");
  if($superuser_uid==="") {
-  merr("Cannot read internal variable 'superuser_uid'"); 
-  return false; 
+  merr("Cannot read internal variable 'superuser_uid'"); return false; 
   }
  if($in_session["uid"]!==$superuser_uid) {
   merr("Account doesn't meet requirements to make this request. This request was not processed.","hack");
@@ -1426,7 +1454,7 @@ function process_modusertable_request(&$in_session,$in_array_data) {
     merr("Unable to get count from appusers table");
     break;
     }
-   if($n_users>($GLOBALS["P_MAX_USERS"]-1)) {
+   if($n_users>($GLOBALS["P_MAX_USER_COUNT"]-1)) {
     merr("Too many users");
     mnotice("Delete one or more users in order to create a new one");
     break;
@@ -1659,7 +1687,7 @@ function modify_my_account(&$session,$in_array_data) {
 
  if(@$in_array_data["new_apikey_name"]!=="") { 
   do {
-   if($GLOBALS["P_MAX_APIKEY"]==0) { 
+   if($GLOBALS["P_MAX_APIKEY_COUNT"]==0) { 
     merr("API key creation is disabled for this application");
     $errorflag=true;
     break;
@@ -1670,7 +1698,7 @@ function modify_my_account(&$session,$in_array_data) {
     $errorflag=true;
     break;
     }
-   if($n_apikeys>($GLOBALS["P_MAX_APIKEY"]-1)) {
+   if($n_apikeys>($GLOBALS["P_MAX_APIKEY_COUNT"]-1)) {
     merr("Too many API keys");
     mnotice("Delete (or let expire) one or more API keys in order to create a new one");
     $errorflag=true;
@@ -1780,7 +1808,7 @@ function modify_my_account(&$session,$in_array_data) {
  if($user_data_change_exists) {
   update_row("appusers",$user_data_changes,"uid",$session["uid"]);
    if(any_db_error()) { 
-    merr("Database error: Unable to write appusers table - account not updated");
+    merr("Database error: Unable to write appusers table");
     return; 
     }
   }
@@ -1793,7 +1821,7 @@ function modify_my_account(&$session,$in_array_data) {
   mnotice("Add the above password to your password manager now - there is no way to get this password once you leave this page");
   }
  if($in_array_data["disable_account"]==="on") {
-  mnotice("Account disabled. You will be automatically logged out. Thank you for using lsc.php!");
+  mnotice("Account disabled - you will be automatically logged out");
   }
 
  }
@@ -1803,7 +1831,7 @@ function modify_my_password(&$session, $in_old_password, $in_new_password) {
  $existing_appuser=Array();
  $result=read_row_expecting_just_one($existing_appuser,"appusers","uid",$session["uid"]);
  if(any_db_error()) { 
-  merr("Unable to read appusers table - account not updated");
+  merr("Database error: Unable to read appusers table");
   return false;
   }
 
@@ -1932,11 +1960,11 @@ function row_method_action(
    break;
    }
   if($row_method_not_found) {
-   merr(actnam($in_row_method)." is not a row method of ".tblnam($in_table).".","hack");
+   merr(actnam($in_row_method)." is not a row method of ".tblnam($in_table),"hack");
    return;
    }
   }else{
-   merr(tblnam($in_table)." doesn't have any row methods.","hack");
+   merr(tblnam($in_table)." doesn't have any row methods","hack");
    return;
   }
 
@@ -1978,7 +2006,7 @@ function start_output($in_table,$session,$in_action) {
    htmlout("<!doctype html>");
    htmlout("<html>");
    htmlout("<head>");
-   htmlout("<title>lsc.php 20240403</title>");
+   htmlout("<title>".$GLOBALS["P_TITLE"]."</title>");
    style_sheet();
    htmlout("</head>");
    htmlout("<body>");
@@ -1997,7 +2025,7 @@ function start_output($in_table,$session,$in_action) {
     $alert_style="color: red;";
     }
 
-   htmloutp("<table><tr><td><h2 style='".$alert_style."'>lsc</h2></td>");
+   htmloutp("<table><tr><td><h2 style='".$alert_style."'>".$GLOBALS["P_APP_NAME"]."</h2></td>");
    htmloutp("<td><h2 style='text-align: right;".$alert_style."'>".$GLOBALS["username"]."@".$GLOBALS["hostname"]."</span></h2></td></tr></table>",1);
 
    # App header / Account bar: shows currently logged in username and account
@@ -2245,53 +2273,8 @@ function finish_output() {
 #   kinda tacked on. ]
 # ----------------------------------------------------------------------------
 
-function usrmgmt_form_section_start() {
- if($GLOBALS["output_format"]!=="html") { return; }
- htmlout("<div style='display: block;' id='view' class='tabcontent'>");
- htmlout("<table class='non-editable-table'>");
- }
-function usrmgmt_form_section_end() {
- if($GLOBALS["output_format"]!=="html") { return; }
- htmlout("</table>");
- htmlout("</div>");
- }
-function usrmgmt_form_section_inbetween() {
- if($GLOBALS["output_format"]!=="html") { return; }
- htmlout("<br />");
- }
-function usrmgmt_form_usercard($in_array_user_data,$in_is_superuser) {
- htmlout("<table class='non-editable-table' id='".safe4html($in_array_user_data["uid"])."'><tr>");
- htmloutp("<td class='form-column-header'>Username</td><td class='form-column-data' colspan=2>");
- htmloutp(safe4html($in_array_user_data["username"],24),1);
- if($in_is_superuser) { htmloutp("👑"); }
- if($in_array_user_data["enabled"]==0) { htmloutp("🚫"); }
- if($in_array_user_data["force_password_reset"]==1) { htmloutp("✳️"); }
- htmloutp("</td>",1);
- htmlout("</tr><tr>");
- htmlout("<td class='form-column-header'>Created</td><td class='form-column-data' colspan=2>".timestamp_to_string($in_array_user_data["created"])."</td>");
- htmlout("</tr><tr>");
- htmlout("<td class='form-column-header'>Last Login</td><td class='form-column-data' colspan=2>".timestamp_to_string($in_array_user_data["last_login_attempt"])."</td>");
- htmlout("</tr></table>");
- # htmlout("<table><tr>");
- # htmlout("<td class='form-column-header'>Enabled?</td><td class='form-column-data'>".$in_array_user_data["enabled"]."</td><td class='form-column-header'>Failed Login Counter</td><td class='form-column-data'>".$in_array_user_data["failed_logins_consec"]."</td>");
- # htmlout("</tr>");
- # htmlout("</table>");
- }
-function usrmgmt_form_apikeycard($in_array_apikey_data) {
- htmlout("<table class='non-editable-table'><tr>");
- htmloutp("<td class='form-column-header'>API key name</td><td class='form-column-data' colspan=2>");
- htmloutp(safe4html($in_array_apikey_data["apikeyname"],24),1);
- htmloutp("</td>",1);
- htmlout("</tr><tr>");
- htmlout("<td class='form-column-header'>Created</td><td class='form-column-data' colspan=2>".timestamp_to_string($in_array_apikey_data["created"])."</td>");
- htmlout("</tr><tr>");
- htmlout("<td class='form-column-header'>Last Accessed</td><td class='form-column-data' colspan=2>".timestamp_to_string($in_array_apikey_data["last_accessed"])."</td>");
- htmlout("</tr><tr>");
- htmlout("<td class='form-column-header'>Use Count</td><td class='form-column-data' colspan=2>".safe4html($in_array_apikey_data["use_count"])."</td>");
- htmlout("</tr></table>");
- }
 
-function usrmgmt_admin_form($session) {
+function show_form_usrmgmt_admin($session) {
 # Output user management form.
 # Only accessible by superuser.
 
@@ -2322,7 +2305,7 @@ function usrmgmt_admin_form($session) {
   htmlout("<input type='hidden' id='action' name='modusertable_action' value='new_user' />");
   usrmgmt_form_section_start();
   htmlout("<tr>");
-  if(count($appuser_list)>($GLOBALS["P_MAX_USERS"]-1)) {
+  if(count($appuser_list)>($GLOBALS["P_MAX_USER_COUNT"]-1)) {
    htmlout("<tr><td colspan=2 class='rowmethod-container'>You can't create a new user until an existing one is deleted.</td></tr>");
    htmlout("<tr><td colspan=2 class='rowmethod-container'> </td></tr>");
    } else {
@@ -2396,20 +2379,56 @@ function usrmgmt_admin_form($session) {
   $GLOBALS["js"].="  }\n";
   $GLOBALS["js"].=" };\n";
  }
+ function usrmgmt_form_section_start() {
+  if($GLOBALS["output_format"]!=="html") { return; }
+  htmlout("<div style='display: block;' id='view' class='tabcontent'>");
+  htmlout("<table class='non-editable-table'>");
+  }
+ function usrmgmt_form_section_inbetween() {
+  if($GLOBALS["output_format"]!=="html") { return; }
+  htmlout("<br />");
+  }
+function usrmgmt_form_section_end() {
+  if($GLOBALS["output_format"]!=="html") { return; }
+  htmlout("</table>");
+  htmlout("</div>");
+ }
+function usrmgmt_form_usercard($in_array_user_data,$in_is_superuser) {
+ htmlout("<table class='non-editable-table' id='".safe4html($in_array_user_data["uid"])."'><tr>");
+ htmloutp("<td class='form-column-header'>Username</td><td class='form-column-data' colspan=2>");
+ htmloutp(safe4html($in_array_user_data["username"],24),1);
+ if($in_is_superuser) { htmloutp("👑"); }
+ if($in_array_user_data["enabled"]==0) { htmloutp("🚫"); }
+ if($in_array_user_data["force_password_reset"]==1) { htmloutp("✳️"); }
+ htmloutp("</td>",1);
+ htmlout("</tr><tr>");
+ htmlout("<td class='form-column-header'>Created</td><td class='form-column-data' colspan=2>".timestamp_to_string($in_array_user_data["created"])."</td>");
+ htmlout("</tr><tr>");
+ htmlout("<td class='form-column-header'>Last Login</td><td class='form-column-data' colspan=2>".timestamp_to_string($in_array_user_data["last_login_attempt"])."</td>");
+ htmlout("</tr></table>");
+ }
+function usrmgmt_form_apikeycard($in_array_apikey_data) {
+ htmlout("<table class='non-editable-table'><tr>");
+ htmloutp("<td class='form-column-header'>API key name</td><td class='form-column-data' colspan=2>");
+ htmloutp(safe4html($in_array_apikey_data["apikeyname"],24),1);
+ htmloutp("</td>",1);
+ htmlout("</tr><tr>");
+ htmlout("<td class='form-column-header'>Created</td><td class='form-column-data' colspan=2>".timestamp_to_string($in_array_apikey_data["created"])."</td>");
+ htmlout("</tr><tr>");
+ htmlout("<td class='form-column-header'>Last Accessed</td><td class='form-column-data' colspan=2>".timestamp_to_string($in_array_apikey_data["last_accessed"])."</td>");
+ htmlout("</tr><tr>");
+ htmlout("<td class='form-column-header'>Use Count</td><td class='form-column-data' colspan=2>".safe4html($in_array_apikey_data["use_count"])."</td>");
+ htmlout("</tr></table>");
+ }
 
 
-function usrmgmt_form($session) { 
+function show_form_usrmgmt($session) { 
 # Output account management form.
  if($GLOBALS["output_format"]!=="html") { return; } # HTML format only.
 
  if(!isset($session["appuser-uid"])) { 
-  htmlout("<p>Please log in to view this form.</p>");
-  return;
+  htmlout("<p>Please log in to view this form.</p>"); return;
   }
-
- # --------------------------------------------------------------------------
- # Get user data
- # --------------------------------------------------------------------------
 
  # grab user record
  $sql2="SELECT * FROM appusers WHERE uid = '".$session["uid"]."'";
@@ -2424,13 +2443,7 @@ function usrmgmt_form($session) {
 
  $is_superuser=isset($session["tag_is_superuser"]);
 
- # --------------------------------------------------------------------------
- # All user data gotten
- # --------------------------------------------------------------------------
-
-  # Basic user info
-  output_table_noneditable_container_start();
-
+ table_container_start();
   $htmlout_session_appuser_uid=safe4html($session["appuser-uid"],32);
   htmlout("<caption class='form-top'>Account Management (".$htmlout_session_appuser_uid.")</caption>");
 
@@ -2439,15 +2452,14 @@ function usrmgmt_form($session) {
    if($is_superuser){ htmloutp("👑"); }
   $htmlout_uid=safe4html($userinfo["uid"],64);
   htmloutp("UID: ".$htmlout_uid."</td></tr>",1);
-  output_table_noneditable_container_end();
+  table_container_end();
 
-  htmlout("<br \>");
+ htmlout("<br \>");
 
-  usrmgmt_form_sessions($session,$is_superuser);
-  usrmgmt_form_apikeys($session);
+ usrmgmt_form_sessions($session,$is_superuser);
+ usrmgmt_form_apikeys($session);
 
-  output_table_noneditable_container_start();
-
+ table_container_start();
   htmlout("<form action='".$GLOBALS["scriptname"]."' method=post>");
   htmlout("<input type='hidden' id='action' name='action' value='modify_my_account' />");
 
@@ -2469,10 +2481,8 @@ function usrmgmt_form($session) {
    }
   htmlout("</tr>");
   htmlout("<tr><td colspan=6 class='rowmethod-container'><button class='rowmethod-button'>Proceed</button></td></tr>");
-  output_table_noneditable_container_end();
-
+  table_container_end();
  }
-
 function usrmgmt_form_sessions($session,$is_superuser) {
 # Generate session information portion of user management form.
 
@@ -2490,32 +2500,31 @@ function usrmgmt_form_sessions($session,$is_superuser) {
  # This is also a GREAT time to check for and drop expired sessions, I guess.
  $session_count=count($session_list);
  foreach($session_list as $session_in_list) {
-  if($session_in_list["created"]+86400<time()) {
+  if(($session_in_list["created"]+86400)<time()) {
    delete_expired_session($session_in_list["sid"]);
    $session_count--;
    }
   }
- output_table_noneditable_container_start();
- htmlout("<tr><td colspan=6>".$session_count." active session(s)</td></tr>");
- htmlout("<tr><td colspan=6>");
- htmlout("<table>");
- foreach($session_list as $session_in_list) {
-  htmloutp("<tr><td>- ".timestamp_to_string($session_in_list["created"]));
-  if($session_in_list["sid"]===$session["sid"]) { htmloutp(" (this session)"); }
-  htmloutp("</td></tr>",1); 
-  }
- htmlout("</table>");
- htmlout("</td></tr>");
- output_table_noneditable_container_end();
+ table_container_start();
+  htmlout("<tr><td colspan=6>".$session_count." active session(s)</td></tr>");
+  htmlout("<tr><td colspan=6>");
+  htmlout("<table>");
+  foreach($session_list as $session_in_list) {
+   htmloutp("<tr><td>- ".timestamp_to_string($session_in_list["created"]));
+   if($session_in_list["sid"]===$session["sid"]) { htmloutp(" (this session)"); }
+   htmloutp("</td></tr>",1); 
+   }
+  htmlout("</table>");
+  htmlout("</td></tr>");
+  table_container_end();
 
  htmlout("<br \>");
  }
-
 function usrmgmt_form_apikeys($session) {
 # Generate API key portion of user management form, if needed.
 
  # Do nothing if basically API keys are disabled.
- if($GLOBALS["P_MAX_APIKEY"]>0) { return; } 
+ if($GLOBALS["P_MAX_APIKEY_COUNT"]<1) { return; } 
 
  # Grab apikeys
  $sql2="SELECT * FROM apikeys WHERE owning_uid = '".$session["uid"]."'";
@@ -2525,47 +2534,48 @@ function usrmgmt_form_apikeys($session) {
  while($row=$results2->fetchArray(SQLITE3_ASSOC)) { $apikey_list[]=$row; };
  
  # API Keys
- output_table_noneditable_container_start();
- htmlout("<tr><td>".count($apikey_list)." API keys</td></tr>");
+ table_container_start();
+  htmlout("<tr><td>".count($apikey_list)." API keys</td></tr>");
 
- foreach($apikey_list as $apikey_in_list) {
- $htmlout_apikeyname=safe4html($apikey_in_list["apikeyname"]);
- htmlout("<form action='".$GLOBALS["scriptname"]."' method=post>");
- htmlout("<input type='hidden' id='action' name='action' value='modify_my_account' />");
- htmlout("<input type='hidden' id='delete_apikey' name='delete_apikey' value='".$htmlout_apikeyname."' />");
+  foreach($apikey_list as $apikey_in_list) {
+  $htmlout_apikeyname=safe4html($apikey_in_list["apikeyname"]);
+  htmlout("<form action='".$GLOBALS["scriptname"]."' method=post>");
+  htmlout("<input type='hidden' id='action' name='action' value='modify_my_account' />");
+  htmlout("<input type='hidden' id='delete_apikey' name='delete_apikey' value='".$htmlout_apikeyname."' />");
 
+   htmlout("<tr>");
+
+   htmlout("<td style='background-color: blue; text-align: right;'>");
+   htmlout("<button class='rowmethod-button'>Delete</button>");
+   htmlout("</td>");
+
+   htmlout("<td colspan=3>"); 
+   usrmgmt_form_apikeycard($apikey_in_list);
+   htmlout("</td>");
+
+   htmlout("</tr>"); 
+   
+   htmlout("</form>");
+   }
+
+  htmlout("</table>");
+  htmlout("<table>");
+
+  # Create API Key
+  htmlout("<form action='".$GLOBALS["scriptname"]."' method=post>");
+  htmlout("<input type='hidden' id='action' name='action' value='modify_my_account' />");
   htmlout("<tr>");
-
-  htmlout("<td style='background-color: blue; text-align: right;'>");
-  htmlout("<button class='rowmethod-button'>Delete</button>");
-  htmlout("</td>");
-
-  htmlout("<td colspan=3>");
-  usrmgmt_form_apikeycard($apikey_in_list);
-  htmlout("</td>");
-
-  htmlout("</tr>");
-  htmlout("</form>");
-  }
-
- htmlout("</table>");
- htmlout("<table>");
-
- # Create API Key
- htmlout("<form action='".$GLOBALS["scriptname"]."' method=post>");
- htmlout("<input type='hidden' id='action' name='action' value='modify_my_account' />");
- htmlout("<tr>");
- if(count($apikey_list)>($GLOBALS["P_MAX_APIKEY"]-1)) {
-  htmlout("<tr><td colspan=2 class='rowmethod-container'>You can't create a new API key until an existing one is deleted or expires.</td></tr>");
-  } else { 
-  htmlout("<td class='form-column-header'><label for='new_apikey_name'>New API Key Name</label</td>");
-  htmlout("<td class='form-column-data'><input style='width: 98%;' type='text' id='new_apikey_name' name='new_apikey_name' required /></td>");
-  htmlout("</tr>");
-  htmlout("<tr><td colspan=2 class='rowmethod-container'><button class='rowmethod-button'>Create API Key</button></td></tr>");
-  htmlout("</form>");
-  }
- htmlout("</table></td></tr>");
- output_table_noneditable_container_end();
+  if(count($apikey_list)>($GLOBALS["P_MAX_APIKEY_COUNT"]-1)) {
+   htmlout("<tr><td colspan=2 class='rowmethod-container'>You can't create a new API key until an existing one is deleted or expires.</td></tr>");
+   } else { 
+   htmlout("<td class='form-column-header'><label for='new_apikey_name'>New API Key Name</label</td>");
+   htmlout("<td class='form-column-data'><input style='width: 98%;' type='text' id='new_apikey_name' name='new_apikey_name' required /></td>");
+   htmlout("</tr>");
+   htmlout("<tr><td colspan=2 class='rowmethod-container'><button class='rowmethod-button'>Create API Key</button></td></tr>");
+   htmlout("</form>");
+   }
+  htmlout("</table></td></tr>");
+  table_container_end();
 
  htmlout("<br \>");
  }
@@ -2583,33 +2593,32 @@ function show_form_reset_my_password_form($session) {
   htmlout("<form action='".$GLOBALS["scriptname"]."' method=post>");
   htmlout("<input type='hidden' id='action' name='action' value='modify_my_password' />");
 
-  output_table_noneditable_container_start();
-
-  htmlout("<caption style='color: red;' class='form-top'>Reset password to continue</caption>");
-  htmlout("<tr>");
-  htmlout("<td class='form-column-header'><label for='old_password'>Current Password</label</td>");
-  htmlout("<td class='form-column-data'><input style='width: 98%;' type='password' id='old_password' name='old_password' required /></td>");
-  htmlout("</tr>");
-  htmlout("<tr>");
-  htmlout("<td class='form-column-header'><label for='new_password'>New Password</label</td>");
-  htmlout("<td class='form-column-data'><input style='width: 98%;' type='password' id='new_password' name='new_password' required /></td>");
-  htmlout("</tr>");
-  htmlout("<tr><td colspan=2 class='rowmethod-container'><button class='rowmethod-button'>Reset Password</button></td></tr>");
-
-  output_table_noneditable_container_end();
+  table_container_start();
+   htmlout("<caption style='color: red;' class='form-top'>Reset password to continue</caption>");
+   htmlout("<tr>");
+   htmlout("<td class='form-column-header'><label for='old_password'>Current Password</label</td>");
+   htmlout("<td class='form-column-data'><input style='width: 98%;' type='password' id='old_password' name='old_password' required /></td>");
+   htmlout("</tr>");
+   htmlout("<tr>");
+   htmlout("<td class='form-column-header'><label for='new_password'>New Password</label</td>");
+   htmlout("<td class='form-column-data'><input style='width: 98%;' type='password' id='new_password' name='new_password' required /></td>");
+   htmlout("</tr>");
+   htmlout("<tr><td colspan=2 class='rowmethod-container'><button class='rowmethod-button'>Reset Password</button></td></tr>");
+   table_container_end();
 
   htmlout("</form>");
 
  }
 
-function login_form() {
+
+function show_form_login() {
 # Output login form
  if($GLOBALS["output_format"]!=="html") { return; } # HTML format only.
 
   htmlout("<form action='".$GLOBALS["scriptname"]."' method=post>");
   htmlout("<input type='hidden' id='action' name='action' value='login' />");
 
-  output_table_noneditable_container_start();
+  table_container_start();
 
   htmlout("<caption class='form-top'>Please Log In</caption>");
   htmlout("<tr>");
@@ -2622,11 +2631,11 @@ function login_form() {
   htmlout("</tr>");
   htmlout("<tr><td colspan=2 class='rowmethod-container'><button class='rowmethod-button'>Log In</button></td></tr>");
 
-  output_table_noneditable_container_end();
+  table_container_end();
 
  }
 
-function output_log($in_return_link) {
+function show_action_history($in_return_link) {
 # Output "Action History" table.
  if($GLOBALS["output_format"]!=="html") { return; } # HTML format only.
 
@@ -2679,8 +2688,11 @@ function output_log($in_return_link) {
  } 
 
 
-function output_table_noneditable($in_which_table,$in_rows_array) {
+function show_table($in_which_table,$in_rows_array) {
 # Output a table, not designed for editing.
+if($GLOBALS["output_format"]!=="html") { 
+ return show_table_text($in_which_table,$in_rows_array);
+ }
 
  # Get a list of columns that are supposed to be in this table, according to
  # the provided schema definition
@@ -2690,8 +2702,8 @@ function output_table_noneditable($in_which_table,$in_rows_array) {
  $table_metadata=schema_rowattr($in_which_table."/FOR_THIS_APP");
 
  # Start generating pieces of the table.
- output_table_noneditable_container_start();
- output_table_noneditable_title($table_metadata["title"]);
+ table_container_start();
+ table_title($table_metadata["title"]);
 
  # Options flag - set if we need extra space for buttons - buttons such as
  # the delete button or row method buttons.
@@ -2788,9 +2800,9 @@ function output_table_noneditable($in_which_table,$in_rows_array) {
    if($first_col_flag) {
     $first_col_flag=false; 
     } else {
-    output_table_noneditable_row_inbetween();
+    table_row_inbetween();
     }
-   output_table_noneditable_row($attrs,$headers[$col],@$data_to_show);
+   table_row($attrs,$headers[$col],@$data_to_show);
    }
 
   # Handle uicache data here.
@@ -2845,29 +2857,29 @@ function output_table_noneditable($in_which_table,$in_rows_array) {
    }
 
   # Finish outputting row.
-  output_table_noneditable_row_end();
+  table_row_end();
   }
 
  # Finish outputting table.
  if( !isset($table_metadata["single-row-only"])
   or !isset($table_metadata["single-row-only-empty-message"]) ) {
-  output_table_noneditable_bottom(count($in_rows_array)." object(s)");
+  table_bottom(count($in_rows_array)." object(s)");
   }else{
    if(count($in_rows_array)==0){
-    output_table_noneditable_bottom($table_metadata["single-row-only-empty-message"]);
+    table_bottom($table_metadata["single-row-only-empty-message"]);
     }
    }
-  output_table_noneditable_column_names($headers);
-  output_table_noneditable_container_end();
+  table_column_names($headers);
+  table_container_end();
  }
 
 
-function output_table_noneditable_container_start() {
+function table_container_start() {
  if($GLOBALS["output_format"]!=="html") { return; }
  htmlout("<div style='display: block;' id='view' class='tabcontent'>");
  htmlout("<table class='non-editable-table'>");
  }
-function output_table_noneditable_title($in_title="Objects") {
+function table_title($in_title="Objects") {
  switch ($GLOBALS["output_format"]) { 
   case "text":
    textout("table",$in_title);
@@ -2880,7 +2892,7 @@ function output_table_noneditable_title($in_title="Objects") {
    break;
   }
  }
-function output_table_noneditable_row($attrs=Array(),$header,$data="") {
+function table_row($attrs=Array(),$header,$data="") {
  switch ($GLOBALS["output_format"]) {
   case "text":
    $text="";
@@ -2912,14 +2924,14 @@ function output_table_noneditable_row($attrs=Array(),$header,$data="") {
    break; # /case "html":
   } # /switch ($GLOBALS["output_format"]) 
  }
-function output_table_noneditable_row_inbetween() {
+function table_row_inbetween() {
  switch ($GLOBALS["output_format"]) {
   case "text":
    textoutp("table-row",",");
    break;
   }
  }
-function output_table_noneditable_row_end() {
+function table_row_end() {
  if($GLOBALS["output_format"]==="text") { 
   textoutp("table-row","",2);
   return;
@@ -2928,7 +2940,7 @@ function output_table_noneditable_row_end() {
  htmlout("</tr>");
  htmlout("<tr><td colspan=2></td></tr>");
  }
-function output_table_noneditable_bottom($message) {
+function table_bottom($message) {
  switch ($GLOBALS["output_format"]) {
   case "text":
    textout("notice",$message);
@@ -2939,7 +2951,7 @@ function output_table_noneditable_bottom($message) {
    break;
   }
  }
-function output_table_noneditable_column_names($in_array_column_names) {
+function table_column_names($in_array_column_names) {
  switch ($GLOBALS["output_format"]) {
   case "text":
    $first=true;
@@ -2955,14 +2967,135 @@ function output_table_noneditable_column_names($in_array_column_names) {
    textoutp("table-row-colnames","",2);
   }
  }
-function output_table_noneditable_container_end() {
+function table_container_end() {
  if($GLOBALS["output_format"]!=="html") { return; }
  htmlout("</table>");
  htmlout("</div>");
  }
 
 
-function output_new_form($in_which_table,$in_rows_count,$in_ini) {
+function show_table_text($in_which_table,$in_rows_array) {
+# Output a table in a text form.
+
+ # Get a list of columns that are supposed to be in this table, according to
+ # the provided schema definition
+ $cols=columns_from_schemadef($in_which_table);
+
+ # Table metadata needed.
+ $table_metadata=schema_rowattr($in_which_table."/FOR_THIS_APP");
+
+ # Get column headers (rendered as left side of table row)
+ $headers=Array();
+ $attrs_cols=Array();
+ foreach($cols as $col) {
+  $attrs_cols[$col]=schema_rowattr($in_which_table.'/'.$col);
+  $headers[$col]=$attrs_cols[$col]["form-label"];
+  }
+ # We will be adding another "virtual" column to this.
+ $cols[]="rightsdata";
+ $headers["rightsdata"]="rights";
+ $attrs_cols["rightsdata"]["data"]="text";
+
+ # Get uicache data.
+ $uicache=read_table_filtered_rows("uicache","objid0",$in_which_table);
+ # TODO: handle DB error
+ # $uicache_data["objtype"]="rights";
+ # $uicache_data["objid0"]=$in_table;
+ # $uicache_data["objid1"]=$find_owner_using_this;
+ # $uicache_data["objid2"]=$in_array_data["$find_owner_using_this"];
+
+ # Loop through each row of the table ...
+ foreach($in_rows_array as $row) {
+
+  # Add uicache data to virtual column.
+  $row["rightsdata"]="";
+  $uicache_first="";
+  foreach($uicache as $uicache_item) {
+   if($uicache_first!=="") { $row["rightsdata"].=";"; }
+   if($uicache_first==="") { $uicache_first===" | "; }
+   if($uicache_item["objid2"]==$row[$uicache_item["objid1"]]) {
+    $row["rightsdata"].=$uicache_item["uidata"];
+    }
+   }
+
+  # Loop through each column of the row.
+  $first_col_flag=true;
+  foreach($cols as $col) {
+   # Get column attributes from table schema.
+   $attrs=$attrs_cols[$col];
+   #
+   # If this is a confirmation key column then we don't want to output the
+   # column value because it's private.  We supply a dummy value instead.
+   if(isset($attrs["is-confirmation-key-for"])){
+    $data_to_show="[Private]";
+    }
+   # Do we need to use another table to output this data?
+   if(!isset($attrs["display-using-other-table"])){
+    # Nothing special if not ...
+    $data_to_show=make_presentable($row[$col],$attrs["data"]);
+    }else{
+    # If "display-using-other-table" is defined ...
+    # that means we don't want to show the raw data value from the table's
+    # row.  The data "points to" data in another table.  So we need to do a
+    # select from that table and gather that data to show instead.
+     # There are four related attributes that should also be present when we
+     # are are used when we're doing this.
+     $select_this=$attrs["display-sql-SELECT"];
+     $from_this=$attrs["display-sql-FROM"];  
+     $where_this=$attrs["display-sql-WHERE"]; 
+     $is_this_from_original_table=$attrs["display-sql-IS"]; 
+     # Issue the SQL request we need to get the data.
+     # Need to use 2nd database object as we are already using the first one.
+     # Code outside the calling function should have this object ready.
+     #echo $select_this." FROM ".$from_this." WHERE ".$where_this." = '".$row[$is_this_from_original_table];
+     $sql2="SELECT ".$select_this." FROM ".$from_this." WHERE ".$where_this." = '".$row[$is_this_from_original_table]."'";
+      mtrace("sql2: \"$sql2\"");
+     $statement2=$GLOBALS["dbo2"]->prepare($sql2);
+     $results2=$statement2->execute();
+     $row2=$results2->fetchArray(SQLITE3_ASSOC);
+     if ((is_bool($row2)) and (!$row2)) {
+      $data_to_show="[Object missing]";
+     }else{
+      # Pointed-to data may consist of multiple fields.
+      # So we have to be able to handle multiple columns here.
+      $spacer=''; $assembled='';
+      foreach($row2 as $individual) {
+       $assembled.=$spacer.$individual; 
+       if($spacer==='') { $spacer='; '; }
+       }
+      $data_to_show=$assembled;
+      }
+     }
+
+   # Present the data to show from the row's column.
+   if($first_col_flag) {
+    $first_col_flag=false;
+   } else {
+    table_row_inbetween(); 
+    }
+   table_row($attrs,$headers[$col],@$data_to_show);
+
+   }
+
+  # Finish outputting row.
+  table_row_end();
+  }
+
+ # Finish outputting table.
+ if( !isset($table_metadata["single-row-only"])
+  or !isset($table_metadata["single-row-only-empty-message"]) ) {
+  table_bottom(count($in_rows_array)." object(s)");
+  }else{
+   if(count($in_rows_array)==0){
+    table_bottom($table_metadata["single-row-only-empty-message"]);
+    }
+   }
+  table_column_names($headers);
+  table_container_end();
+ }
+
+
+function show_form_new_row($in_which_table,$in_rows_count,$in_ini) {
  # get a list of columns that are supposed to be in this table, according to
  # the provided schema definition.
  # A database object ($GLOBALS["dbo"]) is needed to generate lists, if
@@ -3322,10 +3455,15 @@ function is_table_known($in_table) {
 # Issues an merr() if not defined, unless table is "none".
  # Don't issue message for "none", but do say we don't know the table.
  if($in_table==="none"){ return false; }
+ # Well, verify a table was even specified ...
+ if($in_table==="") { 
+  merr("No table specified"); 
+  return false;
+  }
  # Otherwise verify against schema and report accordingly.
  $tables=tables_from_schemadef();
  if(in_array($in_table,$tables)){ return true; }
- merr("Table '".$in_table."' isn't in this database.","hack");
+ merr(tblnam($in_table)." isn't in this database","hack");
  return false;
  }
 
@@ -3571,7 +3709,7 @@ function fill_data_array_from_query_string(
    }
   if (!(isset($out_array_data[$col]))) {
    if($attrs["injourney"]!="app-generates") {
-    merr("query string doesn't contain data for '".$col."'.","bug_or_hack");
+    merr("Data for ".colnam($col)." not specified","bug_or_hack");
     }
    }
   }
@@ -3666,7 +3804,7 @@ $in_which_table, &$out_array_data
    sanitize_app_parameter($in_out_SAFE_PARAMS[$key]);
    }else{
    if(!($value="optional")) {
-    merr("Missing query string parameter '".$key."'");
+    merr("Missing parameter '".$key."'");
     }
    }
   }
@@ -3840,6 +3978,12 @@ function set_report_names_for_insert($in_which_table,$in_data_array) {
 function set_report_names_for_delete($in_which_table,$in_delete_target) {
 # Returns false if evidence suggests $in_delete_target isn't deletable.
 
+ # If no target specified, then we ain't deleting that.
+ if($in_delete_target==="") {
+  merr("No target specified to delete");
+  return false;
+  }
+
  $GLOBALS["report"]["target_objectname"]="'".$in_which_table."' object";
  $GLOBALS["report"]["target_instancename"]="'".$in_delete_target."'";
  if(!isset($GLOBALS["schemadef"][$in_which_table."/FOR_THIS_APP"])) {
@@ -3852,7 +3996,7 @@ function set_report_names_for_delete($in_which_table,$in_delete_target) {
   $GLOBALS["report"]["target_objectname"]=$attrs["friendly-object-name"];
   }
  if(!isset($attrs["allow-delete-by"])) { 
-  merr("Delete requests involving ".tblnam($in_which_table)." are not processed through this interface. The request was not processed.","hack");
+  merr(tblnam($in_which_table)." does not allow direct row delete requests","hack");
   return false;
   }
  if(isset($attrs["instance-friendly-name-is"])) {
@@ -3860,7 +4004,7 @@ function set_report_names_for_delete($in_which_table,$in_delete_target) {
   $result=read_row_expecting_just_one($gotten_row,$in_which_table,$attrs["allow-delete-by"],$in_delete_target);
   if($result===false) {
    $GLOBALS["report"]["target_instancename"]="(Missing Object)";
-   mnotice("This was already deleted. If you are confused look at the Action History.");
+   mnotice("This was already deleted or never existed");
    return false;
   } else { 
    $GLOBALS["report"]["target_instancename"]=$gotten_row[$attrs["instance-friendly-name-is"]];
@@ -3888,12 +4032,12 @@ function make_presentable($in_data,$in_type) {
  switch ($in_type) {
   case "pid":
    if($GLOBALS["output_format"]==="html") { $out_data="<span class='presenting-pid'>"; }
-   $out_data.="PID".$in_data;
+   $out_data.="PID:".$in_data;
    if($GLOBALS["output_format"]==="html") { $out_data.="</span>"; }
    break;
   case "uuid":
    if($GLOBALS["output_format"]==="html") { $out_data="<span class='presenting-uuid'>"; }
-   $out_data.="UUID".$in_data;
+   $out_data.="UUID:".$in_data;
    if($GLOBALS["output_format"]==="html") { $out_data.="</span>"; }
    break;
   case "date":
@@ -4074,6 +4218,14 @@ function is_dbo_created() {
  }
 
 
+function bounce_apikey($in_apikey) {
+# Issue error if an API key exists.
+ if($in_apikey!=="") { 
+  merr("This application does not accept API key authentication for this method");
+  }
+ }
+
+
 function bounce_single_row_only($in_which_table) {
 # Check to see if table already has a row.
 # If it does, issue an error, otherwise do nothing.
@@ -4095,7 +4247,7 @@ function bounce_readonly($in_action) {
 # than 0 elements, outer code is responsible for checking that.
 
  if($GLOBALS["readonly"]) {
-  merr("application is in read-only mode, ".actnam($in_action)." won't be executed.");
+  merr("This application is in read-only mode and will not process ".actnam($in_action)." requests");
   }
  }
 
@@ -4108,7 +4260,7 @@ function bounce_no_toplink($in_which_table) {
  if($in_which_table==="none") { return; }
  $table_metadata=schema_rowattr($in_which_table.'/FOR_THIS_APP');
  if(!isset($table_metadata["toplink"])) {
-  merr("Requests involving this table from this interface are not accepted.","hack");
+  merr("This application does not process requests for this table","hack");
   }
  }
 
@@ -4370,9 +4522,14 @@ function log_entry( $in_session
 
  # We can't do anything if database isn't open.
  if(!isset($GLOBALS["dbo"])){ return false; }
+ # Indicate if API was used.
+ $in_eventdesc1=$in_eventdesc;
+ if(str_starts_with($in_session["sid"],"apicall:")) {
+  $in_eventdesc1="[API] ".$in_eventdesc;
+  }
  # Add it to the log table.
  $log_entry=Array( "source"			=> $in_source
-		  ,"eventdesc"			=> $in_eventdesc
+		  ,"eventdesc"			=> $in_eventdesc1
 		  ,"event"			=> $in_eventbody
 		  ,"timestamp"			=> time()
 		  ,"offer_event_view"		=> $offer_event_view
@@ -4680,6 +4837,7 @@ function read_internal_table(&$out_internal_table_row) {
  $out_internal_table_row=$tmp[0];
  return true;
  }
+
 
 # ----------------------------------------------------------------------------
 # [ Database read and write functions (low-level) ]
@@ -5526,20 +5684,6 @@ function style_sheet() {
 
 function set_schemadef() {
 $GLOBALS["schemadef"]=Array(
-# 'conf/FOR_THIS_APP'			=>  'title:Configuration'
-#					   .'/new-form-title:			Configuration'
-#					   .'/allow-delete-by:			uuid'
-#					   .'/single-row-only'
-#					   .'/single-row-only-empty-message:No configuration currently defined'
-#		            	    	   .'/friendly-object-name:		configuration'
-#					   .'/instance-friendly-name-is:	uuid'
-#					   .'/toplink:				configure'
-#					   .'/owner-identified-by:		uuid'
-#			                	   ,
-# 'conf/uuid'				=>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:UUID/dont-show',
-# 'conf/basefilepath'			=>  'req:y/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localdir/form-label:Base File Path/default-value-from-ini:homedir/present-width:full-width',
-# 'conf/stdoutfilepath'			=>  'req:y/type:str/data:file/minlen:   1/maxlen:   1024/injourney:user-enters-text-for-localdir/form-label:stdout File Path/default-value-from-ini:stdoutdir/present-width:full-width',
- # ---------------------------------------------------------------------------
  'rpmap/FOR_THIS_APP'			=>  'title:Locations (Port and Prefix)'
 					   .'/new-form-title:			Define A Port and Prefix Combination'
 					   .'/allow-delete-by:			uuid'
@@ -5606,22 +5750,6 @@ $GLOBALS["schemadef"]=Array(
 					    '/display-using-other-table/display-sql-SELECT:number,urlprefix/display-sql-FROM:rpmap/display-sql-WHERE:number/display-sql-IS:rpmap',
  'running/lastchecked'			=>  'req:n/type:str/data:date/minlen:   0/maxlen:       0/injourney:row-method/form-label:Last Checked',
  # ---------------------------------------------------------------------------
-# 'maint/FOR_THIS_APP'	    	=>  'title:Maintenance Command Requests'
-#				                   .'/new-form-title:			    Maintenance Request'
-#			                	   .'/allow-delete-by:			    uuid'
-#			                	   .'/single-row-only'
-#		            	    	   .'/single-row-only-empty-message:No active maintenance request.'
-#			                	   .'/friendly-object-name:		    maintenance request'
-#			                	   .'/instance-friendly-name-is:	request'
-#		            	    	   .'/each-row-method:execute,Execute maintenance request,uuid'
-#		            	    	   .'/toplink:				        MR'
-#					   .'/owner-identified-by:		uuid'
-#			                	   ,
-# 'maint/uuid'	       	    	=>  'req:y/type:str/data:uuid/minlen:  36/maxlen:     36/injourney:app-generates/form-label:MRN',
-# 'maint/request'	        	=>  'req:y/type:str/data:name/minlen:   1/maxlen:      64/injourney:user-selects-from-this-list/form-label:Action/this-list:deldb=Delete Database',
-# 'maint/mkey'		         	=>  'req:y/type:str/data:name/minlen:  16/maxlen:    256/injourney:user-enters-text/form-label:Enter A Confirmation Password'.
-#				                    '/is-confirmation-key-for:execute/confirmation-placeholder:Enter Confirmation Password',
- # ---------------------------------------------------------------------------
  'trashcan/FOR_THIS_APP'		=>  'title:Recycle Bin'
 			               	   .'/allow-delete-by:			uuid'
 			               	   .'/each-row-method:restart,Restart This Process,uuid'
@@ -5671,6 +5799,7 @@ function HOMEPAGE() {
  htmlout("<p>If this is a new instance, you will first need to whitelist your desired executables in <code>lsc</code>'s .INI file (<span class='tt'>/etc/lsc/".$GLOBALS["username"]."/lsc.ini</span>).  Then create a configuration.  Next, you'll want to define some locations, a service or two, and after that, you can start and stop them from this interface.</p>");
  htmlout("<p><span class='tt'>lsc</span> as shipped will not run as root, can only launch executables that are whitelisted, will not run setuid/setgid executables, and can only manage services it has started that are running under the same local user account as itself.  There is also an internal blacklist of executable names <span class='tt'>lsc</span> will refuse to run, such as <span class='tt'>/bin/rm</span>.</p>");
  }
+
 
 # ----------------------------------------------------------------------------
 # [ === GENERATOR functions ]
@@ -5834,46 +5963,6 @@ function GENERATOR_pid (
 # [ === ROW METHOD HANDLER functions ]
 # - Row methods are specified in a table's FOR_THIS_APP virtual column.
 # ----------------------------------------------------------------------------
-
-#function ROWMETHOD_execute_maint(
-# $in_table, $in_target, $in_target_table, $in_PARAMS, $in_ini, $in_session
-# ) {
-#
-# # Resolve reference to maintenance request
-# $rrequest=Array();
-# if(!read_row_expecting_just_one($rrequest,$in_table,"uuid",$in_target)) { return false; }
-#
-# # Check if keys match, bounce if they don't.
-# if($in_PARAMS["mkey"]!==$rrequest["mkey"]) {
-#  merr("Confirmation key is wrong.  The request was not executed.");
-#  mnotice("If you forgot the confirmation key, delete your request and try again.");
-#  return false; 
-#  }
-#
-# $not_implemented=false; $close=false;
-# switch ($rrequest["request"]) {
-#  case "deldb":
-#   # TODO: Actually do this.
-#   # mnotice("Database deleted.  It will be automatically recreated the next time the app is accessed.");
-#   $not_implemented=true;
-#   $close=true;
-#   break;
-#  default:
-#   merr("Unrecognized request '".$rrequest["request"]."'.  The request was not executed.","hack");
-#   $close=false;
-#  }
-#
-# if($not_implemented) {
-#  mnotice("'".$rrequest["request"]."' isn't implemented yet.  Nothing was done.");
-#  }
-#
-# if($close) {
-#  delete_row_bypass_schema($in_table,"uuid",$in_target);
-#  if(any_db_error()) { return false; }
-#  mnotice("closing request '".make_presentable($rrequest["uuid"],"uuid")."'.");
-#  }
-#
-# }
 
 
 function ROWMETHOD_check_running( 
@@ -6059,10 +6148,11 @@ function ROWMETHOD_restart_trashcan (
 
  }
 
+
 # ----------------------------------------------------------------------------
 # [ === BUTTONHTML functions ]
 # - Emit HTML to render button when one exists in the action history.
-#   Normally called by output_log().
+#   Normally called by show_action_history().
 # ----------------------------------------------------------------------------
 
 function BUTTONHTML_restart($in_button_type_target) {
@@ -6081,6 +6171,7 @@ function BUTTONHTML_restart($in_button_type_target) {
 function BUTTONHTML_restarted($in_button_type_target) {
  return "\n <tr><td class='logbutton-container'><p class='logbutton'>Restarted above</p></td></tr>\n";
  }
+
 
 # ----------------------------------------------------------------------------
 # [ === BUTTONFALLOFF functions ]
@@ -6108,6 +6199,7 @@ function BUTTONFALLOFF_restarted($in_session,$in_button_type_target) {
 # - Can be provided for any row_column combination.  Will be called when new
 #   row data is being validated.  Expected to return true (OK) or false (bad).
 # ----------------------------------------------------------------------------
+
 
 function VALIDATOR_defined_arguments ( $in_data ) {
  $nbrackets=0; $firstflag=false;
